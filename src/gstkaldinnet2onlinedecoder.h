@@ -26,7 +26,9 @@
 #include "./simple-options-gst.h"
 #include "./gst-audio-source.h"
 
+#include "online2/online-nnet2-decoding-threaded.h"
 #include "online2/online-nnet2-decoding.h"
+
 #include "online2/onlinebin-util.h"
 #include "online2/online-timing.h"
 #include "online2/online-endpoint.h"
@@ -74,6 +76,7 @@ struct _Gstkaldinnet2onlinedecoder {
   SimpleOptionsGst *simple_options;
   OnlineEndpointConfig *endpoint_config;
   OnlineNnet2FeaturePipelineConfig *feature_config;
+  OnlineNnet2DecodingThreadedConfig *nnet2_decoding_threaded_config;
   OnlineNnet2DecodingConfig *nnet2_decoding_config;
 
   OnlineNnet2FeaturePipelineInfo *feature_info;
@@ -84,6 +87,7 @@ struct _Gstkaldinnet2onlinedecoder {
   int sample_rate;
   gboolean decoding;
   float chunk_length_in_secs;
+  bool use_threaded_decoder;
   OnlineIvectorExtractorAdaptationState *adaptation_state;
 
   // The following are needed for optional LM rescoring with a "big" LM

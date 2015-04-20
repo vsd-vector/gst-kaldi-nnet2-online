@@ -7,6 +7,18 @@ DNN acoustic models. The iVectors are adapted to the current audio stream automa
 
 # CHANGELOG
 
+2015-03-05: Threaded decoder can now be selected at configuration time, using the
+`use-threaded-decoder` property. *NB:* this property should be set before other 
+properties. Endpointing and partial results might still not work as expected with the threaded decoder.
+
+2015-03-01: one can now optionally use the threaded online decoder. Citing 
+Daniel Povey who developed the code in Kaldi: "This should make it possible to 
+decode in real-time with larger models and graphs than before, because 
+the decoding and the nnet evaluation are in separate threads and can be done in parallel."
+Use `make CPPFLAGS=-DTHREADED_DECODER` to compile it. Note that the endpointing
+and partial results might not work as expected with the threaded decoder, 
+working on the fix.
+
 2015-01-09: Added language model rescoring functionality. In order to use it,
 you have to specify two properties: `lm-fst` and `big-lm-const-arpa`. The `lm-fst`
 property gives the location of the *original* LM (the one that was used fpr 
@@ -53,6 +65,52 @@ This should result in 'libgstkaldionline2.so'.
 Test if GStreamer can access the plugin:
 
     GST_PLUGIN_PATH=. gst-inspect-1.0 kaldinnet2onlinedecoder
+
+First, this prints a lot of warnings like:
+
+    (gst-inspect-1.0:10810): GLib-GObject-WARNING **: Attempt to add property Gstkaldinnet2onlinedecoder::endpoint-silence-phones after class was initialised
+
+    (gst-inspect-1.0:10810): GLib-GObject-WARNING **: Attempt to add property Gstkaldinnet2onlinedecoder::endpoint-rule1-must-contain-nonsilence after class was initialised
+
+    (gst-inspect-1.0:10810): GLib-GObject-WARNING **: Attempt to add property Gstkaldinnet2onlinedecoder::endpoint-rule1-min-trailing-silence after class was initialised
+
+This is because the properties of the plugin are initialized dynamically from Kaldi components
+and the Kaldi components are created after plugin initialization. It doesn't seem
+to harm any functinality.
+
+The second part of the `gst-inspect-1.0` output should list all plugin properties with their default values:
+
+    Factory Details:
+      Rank                     none (0)
+      Long-name                KaldiNNet2OnlineDecoder
+      Klass                    Speech/Audio
+      Description              Convert speech to text
+    [...]
+      name                : The name of the object
+                            flags: readable, writable
+                            String. Default: "kaldinnet2onlinedecoder0"
+      parent              : The parent of the object
+                            flags: readable, writable
+                            Object of type "GstObject"
+      silent              : Silence the decoder
+                            flags: readable, writable
+                            Boolean. Default: false
+      model               : Filename of the acoustic model
+                            flags: readable, writable
+                            String. Default: "final.mdl"
+    [...]
+      max-nnet-batch-size : Maximum batch size we use in neural-network decodable object, in cases where we are not constrained by currently available frames (this will rarely make a difference)
+                            flags: readable, writable
+                            Integer. Range: -2147483648 - 2147483647 Default: 256 
+
+    Element Signals:
+      "partial-result" :  void user_function (GstElement* object,
+                                              gchararray arg0,
+                                              gpointer user_data);
+      "final-result" :  void user_function (GstElement* object,
+                                            gchararray arg0,
+                                            gpointer user_data);
+
 
 
 # HOW TO USE IT
