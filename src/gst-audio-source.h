@@ -40,6 +40,8 @@ class GstBufferSource {
 
   void SetEnded(bool ended);
 
+  void SetFlush(bool flush);
+
   ~GstBufferSource();
 
  private:
@@ -48,6 +50,7 @@ class GstBufferSource {
   gint pos_in_current_buf_;
   GstBuffer *current_buffer_;
   bool ended_;
+  bool flush_;
   GMutex lock_;
   GCond data_cond_;
   KALDI_DISALLOW_COPY_AND_ASSIGN(GstBufferSource);

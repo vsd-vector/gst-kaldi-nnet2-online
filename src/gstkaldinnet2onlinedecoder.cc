@@ -1,5 +1,6 @@
 /*
  * GStreamer
+ * Copyright 2015 Tilde (author: Askars Salimbajevs)
  * Copyright 2014 Tanel Alumae <tanel.alumae@phon.ioc.ee>
  * Copyright 2014 Johns Hopkins University (author: Daniel Povey)
  *
@@ -48,7 +49,7 @@
 #include "./gstkaldinnet2onlinedecoder.h"
 
 #include "fstext/fstext-lib.h"
-#include "lat/confidence.h"
+#include "lat/sausages.h"
 #include <fst/script/project.h>
 
 namespace kaldi {
@@ -252,8 +253,8 @@ static void gst_kaldinnet2onlinedecoder_class_init(
       "final-result", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
       G_STRUCT_OFFSET(Gstkaldinnet2onlinedecoderClass, final_result),
       NULL,
-      NULL, kaldi_marshal_VOID__STRING, G_TYPE_NONE, 1,
-      G_TYPE_STRING);
+      NULL, kaldi_marshal_VOID__STRING_DOUBLE_DOUBLE, G_TYPE_NONE, 3,
+      G_TYPE_STRING, G_TYPE_DOUBLE, G_TYPE_DOUBLE);
 
   gst_element_class_set_details_simple(
       gstelement_class, "KaldiNNet2OnlineDecoder", "Speech/Audio",
@@ -298,6 +299,7 @@ static void gst_kaldinnet2onlinedecoder_init(
   gst_element_add_pad(GST_ELEMENT(filter), filter->srcpad);
 
   filter->silent = FALSE;
+  filter->last_conf = 0;
   filter->model_rspecifier = g_strdup(DEFAULT_MODEL);
   filter->fst_rspecifier = g_strdup(DEFAULT_FST);
   filter->word_syms_filename = g_strdup(DEFAULT_WORD_SYMS);
@@ -606,6 +608,19 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
   }
 }
 
+static BaseFloat gst_kaldinnet2onlinedecoder_get_conf(const CompactLattice &clat) {
+
+  MinimumBayesRisk mbr(clat,false);
+  std::vector<BaseFloat> conf = mbr.GetOneBestConfidences();
+
+  BaseFloat res = 1;
+  for (size_t i = 0; i < conf.size(); i++) {
+      res = res * conf[i];
+  }
+
+  return res;
+}
+
 static void gst_kaldinnet2onlinedecoder_final_result(
     Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat,
     int64 *tot_num_frames, double *tot_like, guint *num_words) {
@@ -627,6 +642,10 @@ static void gst_kaldinnet2onlinedecoder_final_result(
 
   Lattice best_path_lat;
   ConvertLattice(best_path_clat, &best_path_lat);
+
+  // get confidence
+  double conf = gst_kaldinnet2onlinedecoder_get_conf(clat);
+  filter->last_conf = conf;
 
   double likelihood;
   LatticeWeight weight;
@@ -662,7 +681,7 @@ static void gst_kaldinnet2onlinedecoder_final_result(
     gst_pad_push(filter->srcpad, buffer);
 
     /* Emit a signal for applications. */
-    g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[FINAL_RESULT_SIGNAL], 0, sentence.str().c_str());
+    g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[FINAL_RESULT_SIGNAL], 0, sentence.str().c_str(), (likelihood / num_frames), conf);
   }
 }
 
@@ -816,7 +835,7 @@ static void gst_kaldinnet2onlinedecoder_loop(
       guint num_words = 0;
       gst_kaldinnet2onlinedecoder_final_result(filter, clat, &num_frames,
                                                &tot_like, &num_words);
-      if (num_words > 0) {
+      if (num_words > 0 && filter->last_conf > 0.3) {
         // Only update adaptation state if the utterance was not empty
         feature_pipeline.GetAdaptationState(filter->adaptation_state);
       }
@@ -895,6 +914,25 @@ static gboolean gst_kaldinnet2onlinedecoder_sink_event(GstPad * pad,
       break;
     }
     case GST_EVENT_CAPS: {
+      ret = TRUE;
+      break;
+    }
+    case GST_EVENT_FLUSH_STOP: {
+      /* Stop flushing all buffers */
+      GST_DEBUG_OBJECT(filter, "Flush stop received");
+      filter->audio_source->SetFlush(false);
+      ret = TRUE;
+      break;
+    }
+    case GST_EVENT_FLUSH_START: {
+      /* flush all buffers */
+      GST_DEBUG_OBJECT(filter, "Flush start received");
+      if (filter->decoding) {
+        filter->audio_source->SetFlush(true);
+      } else {
+        GST_DEBUG_OBJECT(filter, "Flush start received while not decoding, pushing event out");
+        gst_pad_push_event(filter->srcpad, gst_event_new_flush_start());
+      }
       ret = TRUE;
       break;
     }

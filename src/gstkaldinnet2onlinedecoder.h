@@ -1,5 +1,6 @@
 // gstkaldinnet2onlinedecoder.h
 
+// Copyright 2015 Tilde (author: Askars Salimbajevs)
 // Copyright 2014 Tanel Alumäe
 
 // See ../COPYING for clarification regarding multiple authors
@@ -62,6 +63,7 @@ struct _Gstkaldinnet2onlinedecoder {
   gboolean silent;
   gboolean do_endpointing;
   gboolean inverse_scale;
+  double last_conf;
   float lmwt_scale;
   GstBufferSource *audio_source;
 
@@ -95,7 +97,7 @@ struct _Gstkaldinnet2onlinedecoder {
 struct _Gstkaldinnet2onlinedecoderClass {
   GstElementClass parent_class;
   void (*partial_result)(GstElement *element, const gchar *result_str);
-  void (*final_result)(GstElement *element, const gchar *result_str);
+  void (*final_result)(GstElement *element, const gchar *result_str, float like, float confidence);
 };
 
 GType gst_kaldinnet2onlinedecoder_get_type(void);

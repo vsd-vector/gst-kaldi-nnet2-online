@@ -25,7 +25,8 @@ namespace kaldi {
 
 
 GstBufferSource::GstBufferSource() :
-  ended_(false) {
+  ended_(false),
+  flush_(false) {
   buf_queue_ = g_async_queue_new();
   current_buffer_ = NULL;
   pos_in_current_buf_ = 0;
@@ -62,6 +63,13 @@ void GstBufferSource::SetEnded(bool ended) {
   g_mutex_unlock(&lock_);
 }
 
+void GstBufferSource::SetFlush(bool flush) {
+  g_mutex_lock(&lock_);
+  flush_ = flush;
+  g_cond_signal(&data_cond_);
+  g_mutex_unlock(&lock_);
+}
+
 
 bool GstBufferSource::Read(Vector<BaseFloat> *data) {
   uint32 nsamples_req = data->Dim();  // (16bit) samples requested
@@ -81,6 +89,12 @@ bool GstBufferSource::Read(Vector<BaseFloat> *data) {
     g_mutex_unlock(&lock_);
     if (current_buffer_ == NULL) {
       break;
+    }
+    if (flush_) {      
+      gst_buffer_unref(current_buffer_);
+      current_buffer_ = NULL;
+      pos_in_current_buf_ = 0;
+      continue;     
     }
     uint32 nbytes_from_current =
         std::min(nsamples_req * sizeof(SampleType) - nbytes_transferred,
@@ -102,16 +116,20 @@ bool GstBufferSource::Read(Vector<BaseFloat> *data) {
     }
   }
 
-  uint32 nsamples_received = nbytes_transferred / sizeof(SampleType);
-  for (int i = 0; i < nsamples_received ; ++i) {
-    (*data)(i) = static_cast<BaseFloat>(buf[i]);
-  }
-
-  if (nsamples_received < nsamples_req) {
-    data->Resize(nsamples_received, kCopyData);
-  }
-  return !((g_async_queue_length(buf_queue_) < sizeof(SampleType))
+  if (!flush_) {
+    uint32 nsamples_received = nbytes_transferred / sizeof(SampleType);
+    for (int i = 0; i < nsamples_received ; ++i) {
+      (*data)(i) = static_cast<BaseFloat>(buf[i]);
+    }
+  
+    if (nsamples_received < nsamples_req) {
+      data->Resize(nsamples_received, kCopyData);
+    }
+    return !((g_async_queue_length(buf_queue_) < sizeof(SampleType))
       && ended_
       && (current_buffer_ == NULL));
+  } else {
+    return false;
+  } 
 }
 }
