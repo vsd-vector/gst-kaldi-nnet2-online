@@ -895,16 +895,27 @@ static void gst_kaldinnet2onlinedecoder_unthreaded_decode_segment(Gstkaldinnet2o
                                       *(filter->decode_fst),
                                       &feature_pipeline);
 
+  OnlineSilenceWeighting silence_weighting(*(filter->trans_model),
+           filter->feature_info->silence_weighting_config);
+
+
   Vector<BaseFloat> wave_part = Vector<BaseFloat>(chunk_length);
   GST_DEBUG_OBJECT(filter, "Reading audio in %d sample chunks...",
                    wave_part.Dim());
   BaseFloat last_traceback = 0.0;
   BaseFloat num_seconds_decoded = 0.0;
+  std::vector<std::pair<int32, BaseFloat> > delta_weights;
   while (true) {
     more_data = filter->audio_source->Read(&wave_part);
     feature_pipeline.AcceptWaveform(filter->sample_rate, wave_part);
     if (!more_data) {
       feature_pipeline.InputFinished();
+    }
+    if (silence_weighting.Active()) {
+      silence_weighting.ComputeCurrentTraceback(decoder.Decoder());
+      silence_weighting.GetDeltaWeights(feature_pipeline.NumFramesReady(),
+                                                 &delta_weights);
+      feature_pipeline.UpdateFrameWeights(delta_weights);
     }
     decoder.AdvanceDecoding();
     if (!more_data) {
@@ -997,6 +1008,7 @@ gst_kaldinnet2onlinedecoder_query (GstPad *pad, GstObject * parent, GstQuery * q
         filter->feature_info = new OnlineNnet2FeaturePipelineInfo(*(filter->feature_config));
         filter->sample_rate = (int) filter->feature_info->mfcc_opts.frame_opts.samp_freq;
       }
+
       GstCaps *new_caps = gst_caps_new_simple ("audio/x-raw",
             "format", G_TYPE_STRING, "S16LE",
             "rate", G_TYPE_INT, filter->sample_rate,
