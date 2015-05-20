@@ -3,6 +3,7 @@
  * Copyright 2015 Tilde (author: Askars Salimbajevs)
  * Copyright 2014 Tanel Alumae <tanel.alumae@phon.ioc.ee>
  * Copyright 2014 Johns Hopkins University (author: Daniel Povey)
+ * Copyright 2015 University of Sheffield (author: Ricard Marxer <r.marxer@sheffield.ac.uk>)
  *
  * 
  *
@@ -50,7 +51,13 @@
 
 #include "fstext/fstext-lib.h"
 #include "lat/sausages.h"
+#include "lat/confidence.h"
+#include "hmm/hmm-utils.h"
 #include <fst/script/project.h>
+
+#include <fstream>
+#include <iostream>
+
 
 namespace kaldi {
 
@@ -62,6 +69,8 @@ enum {
   PARTIAL_RESULT_SIGNAL,
   FINAL_RESULT_SIGNAL,
   NBEST_RESULT_SIGNAL,
+  PARTIAL_PHONE_ALIGNMENT_SIGNAL,
+  FINAL_PHONE_ALIGNMENT_SIGNAL,
   LAST_SIGNAL
 };
 
@@ -72,23 +81,28 @@ enum {
   PROP_MODEL,
   PROP_FST,
   PROP_WORD_SYMS,
+  PROP_PHONE_SYMS,
+  PROP_DO_PHONE_ALIGNMENT,
   PROP_DO_ENDPOINTING,
   PROP_ADAPTATION_STATE,
   PROP_INVERSE_SCALE,
   PROP_LMWT_SCALE,
   PROP_CHUNK_LENGTH_IN_SECS,
+  PROP_TRACEBACK_PERIOD_IN_SECS,
   PROP_LM_FST,
   PROP_BIG_LM_CONST_ARPA,
   PROP_USE_THREADED_DECODER,
   PROP_LAST
 };
 
-#define DEFAULT_MODEL           "final.mdl"
-#define DEFAULT_FST             "HCLG.fst"
-#define DEFAULT_WORD_SYMS       "words.txt"
+#define DEFAULT_MODEL           ""
+#define DEFAULT_FST             ""
+#define DEFAULT_WORD_SYMS       ""
+#define DEFAULT_PHONE_SYMS       ""
 #define DEFAULT_LMWT_SCALE	1.0
 #define DEFAULT_CHUNK_LENGTH_IN_SECS  0.05
 #define DEFAULT_USE_THREADED_DECODER false
+#define DEFAULT_TRACEBACK_PERIOD_IN_SECS  0.5
 
 /* the capabilities of the inputs and outputs.
  *
@@ -114,6 +128,24 @@ static guint gst_kaldinnet2onlinedecoder_signals[LAST_SIGNAL];
 #define gst_kaldinnet2onlinedecoder_parent_class parent_class
 G_DEFINE_TYPE(Gstkaldinnet2onlinedecoder, gst_kaldinnet2onlinedecoder,
               GST_TYPE_ELEMENT);
+
+static void gst_kaldinnet2onlinedecoder_load_phone_syms(Gstkaldinnet2onlinedecoder * filter,
+                                                        const GValue * value);
+
+static void gst_kaldinnet2onlinedecoder_load_word_syms(Gstkaldinnet2onlinedecoder * filter,
+                                                       const GValue * value);
+
+static void gst_kaldinnet2onlinedecoder_load_model(Gstkaldinnet2onlinedecoder * filter,
+                                                   const GValue * value);
+
+static void gst_kaldinnet2onlinedecoder_load_fst(Gstkaldinnet2onlinedecoder * filter,
+                                                 const GValue * value);
+
+static void gst_kaldinnet2onlinedecoder_load_lm_fst(Gstkaldinnet2onlinedecoder * filter,
+                                                    const GValue * value);
+
+static void gst_kaldinnet2onlinedecoder_load_big_lm(Gstkaldinnet2onlinedecoder * filter,
+                                                    const GValue * value);
 
 static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
                                                      guint prop_id,
@@ -190,6 +222,23 @@ static void gst_kaldinnet2onlinedecoder_class_init(
                           (GParamFlags) G_PARAM_READWRITE));
   g_object_class_install_property(
       gobject_class,
+      PROP_PHONE_SYMS,
+      g_param_spec_string("phone-syms", "Phoneme symbols",
+                          "Name of phoneme symbols file (typically phones.txt)",
+                          DEFAULT_PHONE_SYMS,
+                          (GParamFlags) G_PARAM_READWRITE));
+
+  g_object_class_install_property(
+      gobject_class,
+      PROP_DO_PHONE_ALIGNMENT,
+      g_param_spec_boolean(
+          "do-phone-alignment", "Phoneme-level alignment",
+          "If true, output phoneme-level alignment",
+          FALSE,
+          (GParamFlags) G_PARAM_READWRITE));
+
+  g_object_class_install_property(
+      gobject_class,
       PROP_DO_ENDPOINTING,
       g_param_spec_boolean(
           "do-endpointing", "If true, apply endpoint detection",
@@ -234,6 +283,17 @@ static void gst_kaldinnet2onlinedecoder_class_init(
           0.05,
           G_MAXFLOAT,
           DEFAULT_CHUNK_LENGTH_IN_SECS,
+          (GParamFlags) G_PARAM_READWRITE));
+
+  g_object_class_install_property(
+      gobject_class,
+      PROP_TRACEBACK_PERIOD_IN_SECS,
+      g_param_spec_float(
+          "traceback-period-in-secs", "Time period after which new interim recognition result is sent",
+          "Time period after which new interim recognition result is sent",
+          0.05,
+          G_MAXFLOAT,
+          DEFAULT_TRACEBACK_PERIOD_IN_SECS,
           (GParamFlags) G_PARAM_READWRITE));
 
   g_object_class_install_property(
@@ -284,6 +344,20 @@ static void gst_kaldinnet2onlinedecoder_class_init(
       NULL, kaldi_marshal_VOID__STRING_DOUBLE_DOUBLE, G_TYPE_NONE, 3,
       G_TYPE_STRING, G_TYPE_DOUBLE, G_TYPE_DOUBLE);
 
+  gst_kaldinnet2onlinedecoder_signals[FINAL_PHONE_ALIGNMENT_SIGNAL] = g_signal_new(
+      "final-phone-alignment", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
+      G_STRUCT_OFFSET(Gstkaldinnet2onlinedecoderClass, final_phone_alignment),
+      NULL,
+      NULL, kaldi_marshal_VOID__STRING, G_TYPE_NONE, 1,
+      G_TYPE_STRING);
+
+  gst_kaldinnet2onlinedecoder_signals[PARTIAL_PHONE_ALIGNMENT_SIGNAL] = g_signal_new(
+      "partial-phone-alignment", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
+      G_STRUCT_OFFSET(Gstkaldinnet2onlinedecoderClass, partial_phone_alignment),
+      NULL,
+      NULL, kaldi_marshal_VOID__STRING, G_TYPE_NONE, 1,
+      G_TYPE_STRING);
+
   gst_element_class_set_details_simple(
       gstelement_class, "KaldiNNet2OnlineDecoder", "Speech/Audio",
       "Convert speech to text", "Tanel Alumae <tanel.alumae@phon.ioc.ee>");
@@ -309,6 +383,10 @@ static void gst_kaldinnet2onlinedecoder_init(
   double tmp_double;
   std::string tmp_string;
 
+  filter->trans_model = NULL;
+  filter->nnet = NULL;
+  filter->decode_fst = NULL;
+
   filter->sinkpad = NULL;
 
   filter->sinkpad = gst_pad_new_from_static_template(&sink_template, "sink");
@@ -332,6 +410,9 @@ static void gst_kaldinnet2onlinedecoder_init(
   filter->model_rspecifier = g_strdup(DEFAULT_MODEL);
   filter->fst_rspecifier = g_strdup(DEFAULT_FST);
   filter->word_syms_filename = g_strdup(DEFAULT_WORD_SYMS);
+  filter->phone_syms_filename = g_strdup(DEFAULT_PHONE_SYMS);
+
+  filter->do_phone_alignment = false;
 
   filter->simple_options = new SimpleOptionsGst();
 
@@ -461,16 +542,19 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
       filter->nbest = g_value_get_uint(value);
       break;
     case PROP_MODEL:
-      g_free(filter->model_rspecifier);
-      filter->model_rspecifier = g_value_dup_string(value);
+      gst_kaldinnet2onlinedecoder_load_model(filter, value);
       break;
     case PROP_FST:
-      g_free(filter->fst_rspecifier);
-      filter->fst_rspecifier = g_value_dup_string(value);
+      gst_kaldinnet2onlinedecoder_load_fst(filter, value);
       break;
     case PROP_WORD_SYMS:
-      g_free(filter->word_syms_filename);
-      filter->word_syms_filename = g_value_dup_string(value);
+      gst_kaldinnet2onlinedecoder_load_word_syms(filter, value);
+      break;
+    case PROP_PHONE_SYMS:
+      gst_kaldinnet2onlinedecoder_load_phone_syms(filter, value);
+      break;
+    case PROP_DO_PHONE_ALIGNMENT:
+      filter->do_phone_alignment = g_value_get_boolean(value);
       break;
     case PROP_DO_ENDPOINTING:
       filter->do_endpointing = g_value_get_boolean(value);
@@ -484,13 +568,14 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
     case PROP_CHUNK_LENGTH_IN_SECS:
       filter->chunk_length_in_secs = g_value_get_float(value);
       break;
+    case PROP_TRACEBACK_PERIOD_IN_SECS:
+      filter->traceback_period_in_secs = g_value_get_float(value);
+      break;
     case PROP_LM_FST:
-      g_free(filter->lm_fst_name);
-      filter->lm_fst_name = g_value_dup_string(value);
+      gst_kaldinnet2onlinedecoder_load_lm_fst(filter, value);
       break;
     case PROP_BIG_LM_CONST_ARPA:
-      g_free(filter->big_lm_const_arpa_name);
-      filter->big_lm_const_arpa_name = g_value_dup_string(value);
+      gst_kaldinnet2onlinedecoder_load_big_lm(filter, value);
       break;
     case PROP_USE_THREADED_DECODER:
       filter->use_threaded_decoder = g_value_get_boolean(value);
@@ -538,7 +623,7 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
           switch (option_type) {
             case SimpleOptions::kBool:
               filter->simple_options->SetOption(name,
-                                                g_value_get_boolean(value));
+                                                (bool)g_value_get_boolean(value));
               break;
             case SimpleOptions::kInt32:
               filter->simple_options->SetOption(name, g_value_get_int(value));
@@ -596,6 +681,12 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
     case PROP_WORD_SYMS:
       g_value_set_string(value, filter->word_syms_filename);
       break;
+    case PROP_PHONE_SYMS:
+      g_value_set_string(value, filter->phone_syms_filename);
+      break;
+    case PROP_DO_PHONE_ALIGNMENT:
+      g_value_set_boolean(value, filter->do_phone_alignment);
+      break;
     case PROP_DO_ENDPOINTING:
       g_value_set_boolean(value, filter->do_endpointing);
       break;
@@ -607,6 +698,9 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
       break;
     case PROP_CHUNK_LENGTH_IN_SECS:
       g_value_set_float(value, filter->chunk_length_in_secs);
+      break;
+    case PROP_TRACEBACK_PERIOD_IN_SECS:
+      g_value_set_float(value, filter->traceback_period_in_secs);
       break;
     case PROP_LM_FST:
       g_value_set_string(value, filter->lm_fst_name);
@@ -667,6 +761,7 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
   }
 }
 
+
 static BaseFloat gst_kaldinnet2onlinedecoder_get_conf(const CompactLattice &clat) {
 
   MinimumBayesRisk mbr(clat,false);
@@ -678,6 +773,58 @@ static BaseFloat gst_kaldinnet2onlinedecoder_get_conf(const CompactLattice &clat
   }
 
   return res;
+
+static void gst_kaldinnet2onlinedecoder_phone_alignment(
+    Gstkaldinnet2onlinedecoder * filter, const std::vector<int32>& alignment,
+    bool final) {
+        if (filter->do_phone_alignment) {
+        if (strcmp(filter->phone_syms_filename, "") == 0) {
+            GST_ERROR_OBJECT(filter, "Phoneme symbol table filename (phone-syms) must be set to do phone alignment.");
+        } else if (filter->phone_syms == NULL) {
+            GST_ERROR_OBJECT(filter, "Phoneme symbol table wasn't loaded correctly. Not performing alignment.");
+        } else {
+            GST_DEBUG_OBJECT(filter, "Phoneme alignment...");
+
+            // Output the alignment with the weights
+            std::vector<std::vector<int32> > split;
+            SplitToPhones(*filter->trans_model, alignment, &split);
+
+            GST_DEBUG_OBJECT(filter, "Split to phones finished");
+
+            BaseFloat frame_shift = filter->feature_info->FrameShiftInSeconds();
+            std::vector<std::pair<int32, BaseFloat> > pairs;
+            std::stringstream phone_alignment;
+
+            for (size_t i = 0; i < split.size(); i++) {
+              GST_DEBUG_OBJECT(filter, "Iterating over splits split[%lu].size() == %lu", i, split[i].size());
+              KALDI_ASSERT(split[i].size() > 0);
+              int32 phone = filter->trans_model->TransitionIdToPhone(split[i][0]);
+              std::string s = filter->phone_syms->Find(phone);
+              if (s == "") {
+                GST_ERROR_OBJECT(filter, "Phoneme-id %d not in symbol table.", phone);
+              }
+
+              int32 num_repeats = split[i].size();
+
+              phone_alignment << s << " " << num_repeats*frame_shift << std::endl;
+
+              pairs.push_back(std::make_pair(phone, num_repeats*frame_shift));
+            }
+
+            guint pali_length = phone_alignment.str().length();
+            GstBuffer *pali_buffer = gst_buffer_new_and_alloc(pali_length + 1);
+            gst_buffer_fill(pali_buffer, 0, phone_alignment.str().c_str(), pali_length);
+            gst_buffer_memset(pali_buffer, pali_length, '\n', 1);
+            gst_pad_push(filter->srcpad, pali_buffer);
+
+            /* Emit a signal for applications. */
+            if (final) {
+                g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[FINAL_PHONE_ALIGNMENT_SIGNAL], 0, phone_alignment.str().c_str());
+            } else {
+                g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[PARTIAL_PHONE_ALIGNMENT_SIGNAL], 0, phone_alignment.str().c_str());
+            }
+        }
+    }
 }
 
 static void gst_kaldinnet2onlinedecoder_final_result(
@@ -783,6 +930,8 @@ static void gst_kaldinnet2onlinedecoder_partial_result(
   }
   GST_DEBUG_OBJECT(filter, "Partial: %s", sentence.str().c_str());
   if (sentence.str().length() > 0) {
+    gst_kaldinnet2onlinedecoder_phone_alignment(filter, alignment, false);
+
     /* Emit a signal for applications. */
     g_signal_emit(filter,
                   gst_kaldinnet2onlinedecoder_signals[PARTIAL_RESULT_SIGNAL], 0,
@@ -845,11 +994,11 @@ static bool gst_kaldinnet2onlinedecoder_rescore_big_lm(
   return true;
 }
 
-
 static void gst_kaldinnet2onlinedecoder_threaded_decode_segment(Gstkaldinnet2onlinedecoder * filter,
                                                       bool &more_data,
                                                       int32 chunk_length,
-                                                      BaseFloat traceback_period_secs) {
+                                                      BaseFloat traceback_period_secs,
+                                                      Vector<BaseFloat> *remaining_wave_part) {
     SingleUtteranceNnet2DecoderThreaded decoder(*(filter->nnet2_decoding_threaded_config),
                                         *(filter->trans_model), *(filter->nnet),
                                         *(filter->decode_fst),
@@ -861,16 +1010,39 @@ static void gst_kaldinnet2onlinedecoder_threaded_decode_segment(Gstkaldinnet2onl
                      wave_part.Dim());
     BaseFloat last_traceback = 0.0;
     BaseFloat num_seconds_decoded = 0.0;
+    if (remaining_wave_part->Dim() > 0) {
+      GST_DEBUG_OBJECT(filter, "Submitting remaining wave of size %d", remaining_wave_part->Dim());
+      decoder.AcceptWaveform(filter->sample_rate, *remaining_wave_part);
+      while (decoder.NumFramesReceivedApprox() - decoder.NumFramesDecoded() > 100) {
+        Sleep(0.1);
+      }
+    }
     while (true) {
       more_data = filter->audio_source->Read(&wave_part);
+      GST_DEBUG_OBJECT(filter, "Submitting wave of size: %d", wave_part.Dim());
       decoder.AcceptWaveform(filter->sample_rate, wave_part);
       if (!more_data) {
         decoder.InputFinished();
-      }
-      if (!more_data) {
         break;
       }
+
       if (filter->do_endpointing) {
+        GST_DEBUG_OBJECT(filter, "Before the sleep check: Frames received: ~ %d, frames decoded: %d, pieces pending: %d",
+                         decoder.NumFramesReceivedApprox(),
+                         decoder.NumFramesDecoded(),
+                         decoder.NumWaveformPiecesPending());
+
+        // Wait until there are less than one second of frames left to decode
+        // Depends of the frame shift, but one second is also selected arbitrarily
+        while (decoder.NumFramesReceivedApprox() - decoder.NumFramesDecoded() > 100) {
+          Sleep(0.1);
+        }
+
+        GST_DEBUG_OBJECT(filter, "After the sleep check: Frames received: ~ %d, frames decoded: %d, pieces pending: %d",
+                         decoder.NumFramesReceivedApprox(),
+                         decoder.NumFramesDecoded(),
+                         decoder.NumWaveformPiecesPending());
+
         if ((decoder.NumFramesDecoded() > 0)
             && decoder.EndpointDetected(*(filter->endpoint_config))) {
           decoder.TerminateDecoding();
@@ -887,8 +1059,12 @@ static void gst_kaldinnet2onlinedecoder_threaded_decode_segment(Gstkaldinnet2onl
         last_traceback += traceback_period_secs;
       }
     }
+
+    decoder.Wait();
+    decoder.GetRemainingWaveform(remaining_wave_part);
+    GST_DEBUG_OBJECT(filter, "Remaining waveform size: %d", remaining_wave_part->Dim());
+
     if (num_seconds_decoded > 0.1) {
-      decoder.Wait();
       GST_DEBUG_OBJECT(filter, "Getting lattice..");
       decoder.FinalizeDecoding();
       CompactLattice clat;
@@ -957,6 +1133,7 @@ static void gst_kaldinnet2onlinedecoder_unthreaded_decode_segment(Gstkaldinnet2o
     if (!more_data) {
       break;
     }
+    GST_DEBUG_OBJECT(filter, "%d frames decoded", decoder.NumFramesDecoded());
     if (filter->do_endpointing
         && (decoder.NumFramesDecoded() > 0)
         && decoder.EndpointDetected(*(filter->endpoint_config))) {
@@ -964,7 +1141,8 @@ static void gst_kaldinnet2onlinedecoder_unthreaded_decode_segment(Gstkaldinnet2o
       break;
     }
     num_seconds_decoded += filter->chunk_length_in_secs;
-    if (num_seconds_decoded - last_traceback > traceback_period_secs) {
+    if ((num_seconds_decoded - last_traceback > traceback_period_secs)
+        && (decoder.NumFramesDecoded() > 0)) {
       Lattice lat;
       decoder.GetBestPath(false, &lat);
       gst_kaldinnet2onlinedecoder_partial_result(filter, lat);
@@ -1005,14 +1183,15 @@ static void gst_kaldinnet2onlinedecoder_loop(
     Gstkaldinnet2onlinedecoder * filter) {
 
   GST_DEBUG_OBJECT(filter, "Starting decoding loop..");
-  BaseFloat traceback_period_secs = 1.0;
+  BaseFloat traceback_period_secs = filter->traceback_period_in_secs;
 
   int32 chunk_length = int32(filter->sample_rate * filter->chunk_length_in_secs);
 
   bool more_data = true;
+  Vector<BaseFloat> remaining_wave_part;
   while (more_data) {
     if (filter->use_threaded_decoder) {
-      gst_kaldinnet2onlinedecoder_threaded_decode_segment(filter, more_data, chunk_length, traceback_period_secs);
+      gst_kaldinnet2onlinedecoder_threaded_decode_segment(filter, more_data, chunk_length, traceback_period_secs, &remaining_wave_part);
     } else {
       gst_kaldinnet2onlinedecoder_unthreaded_decode_segment(filter, more_data, chunk_length, traceback_period_secs);
     }
@@ -1157,94 +1336,285 @@ static GstFlowReturn gst_kaldinnet2onlinedecoder_chain(GstPad * pad,
   }
 }
 
+static void
+gst_kaldinnet2onlinedecoder_load_word_syms(Gstkaldinnet2onlinedecoder * filter,
+                                           const GValue * value) {
+    if (G_VALUE_HOLDS_STRING(value)) {
+        gchar* str = g_value_dup_string(value);
+
+        // Check if the model is not empty
+        if (strcmp(str, "") != 0) {
+            try {
+                GST_DEBUG_OBJECT(filter, "Loading word symbols file: %s", str);
+
+                fst::SymbolTable * new_word_syms = fst::SymbolTable::ReadText(str);
+                if (!new_word_syms) {
+                    throw std::runtime_error("Word symbol table not read.");
+                }
+
+                // Delete old objects if needed
+                if (filter->word_syms) {
+                    delete filter->word_syms;
+                }
+
+                // Replace the symbol table
+                filter->word_syms = new_word_syms;
+
+                // Only change the parameter if it has worked correctly
+                g_free(filter->word_syms_filename);
+                filter->word_syms_filename = g_strdup(str);
+
+            } catch (std::runtime_error& e) {
+              GST_WARNING_OBJECT(filter, "Error loading the word symbol table: %s", str);
+            }
+        }
+
+        g_free(str);
+    } else {
+        GST_WARNING_OBJECT(filter, "Word symbols filename property must be a string. Ignoring it.");
+    }
+}
+
+static void
+gst_kaldinnet2onlinedecoder_load_phone_syms(Gstkaldinnet2onlinedecoder * filter,
+                                           const GValue * value) {
+    if (G_VALUE_HOLDS_STRING(value)) {
+        gchar* str = g_value_dup_string(value);
+
+        // Check if the model filename is not empty
+        if (strcmp(str, "") != 0) {
+            try {
+                GST_DEBUG_OBJECT(filter, "Loading phone symbols file: %s", str);
+
+                fst::SymbolTable * new_phone_syms = fst::SymbolTable::ReadText(str);
+                if (!new_phone_syms) {
+                    throw std::runtime_error("Phone symbol table not read.");
+                }
+
+                // Delete old objects if needed
+                if (filter->phone_syms) {
+                    delete filter->phone_syms;
+                }
+
+                // Replace the symbol table
+                filter->phone_syms = new_phone_syms;
+
+                // Only change the parameter if it has worked correctly
+                g_free(filter->phone_syms_filename);
+                filter->phone_syms_filename = g_strdup(str);
+
+            } catch (std::runtime_error& e) {
+              GST_WARNING_OBJECT(filter, "Error loading the phone symbol table: %s", str);
+            }
+        }
+
+        g_free(str);
+    } else {
+        GST_WARNING_OBJECT(filter, "Phone symbols filename property must be a string. Ignoring it.");
+    }
+}
+
+static void
+gst_kaldinnet2onlinedecoder_load_model(Gstkaldinnet2onlinedecoder * filter,
+                                       const GValue * value) {
+    if (G_VALUE_HOLDS_STRING(value)) {
+        gchar* str = g_value_dup_string(value);
+
+        // Check if the model filename is not empty
+        if (strcmp(str, "") != 0) {
+            // Build objects if needed
+            if (!filter->trans_model) {
+                filter->trans_model = new TransitionModel();
+            }
+
+            if (!filter->nnet) {
+                filter->nnet = new nnet2::AmNnet();
+            }
+
+            // Make the objects read the new models
+            try {
+                bool binary;
+                Input ki(str, &binary);
+                filter->trans_model->Read(ki.Stream(), binary);
+                filter->nnet->Read(ki.Stream(), binary);
+
+                // Only change the parameter if it has worked correctly
+                g_free(filter->model_rspecifier);
+                filter->model_rspecifier = g_strdup(str);
+
+            } catch (std::runtime_error& e) {
+                GST_WARNING_OBJECT(filter, "Error loading the model: %s", str);
+            }
+        }
+
+        g_free(str);
+    } else {
+        GST_WARNING_OBJECT(filter, "Model property must be a Kaldi rspecifier string. Ignoring it.");
+    }
+}
+
+static void
+gst_kaldinnet2onlinedecoder_load_fst(Gstkaldinnet2onlinedecoder * filter,
+                                     const GValue * value) {
+    if (G_VALUE_HOLDS_STRING(value)) {
+        gchar* str = g_value_dup_string(value);
+
+        // Check if the model filename is not empty
+        if (strcmp(str, "") != 0) {
+            try {
+                GST_DEBUG_OBJECT(filter, "Loading decoder graph: %s", str);
+
+                fst::Fst<fst::StdArc> * new_decode_fst = fst::ReadFstKaldi(str);
+
+                // Delete objects if needed
+                if (filter->decode_fst) {
+                    delete filter->decode_fst;
+                }
+
+                // Replace the decoding graph
+                filter->decode_fst = new_decode_fst;
+
+                // Only change the parameter if it has worked correctly
+                g_free(filter->fst_rspecifier);
+                filter->fst_rspecifier = g_strdup(str);
+
+            } catch (std::runtime_error& e) {
+              GST_WARNING_OBJECT(filter, "Error loading the FST decoding graph: %s", str);
+            }
+        }
+
+        g_free(str);
+    } else {
+        GST_WARNING_OBJECT(filter, "FST property must be a Kaldi rspecifier string. Ignoring it.");
+    }
+}
+
+static void
+gst_kaldinnet2onlinedecoder_load_lm_fst(Gstkaldinnet2onlinedecoder * filter,
+                                        const GValue * value) {
+  if (G_VALUE_HOLDS_STRING(value)) {
+    gchar* str = g_value_dup_string(value);
+
+    // Check if the model filename is not empty
+    if (strcmp(str, "") != 0) {
+      try {
+        GST_DEBUG_OBJECT(filter, "Loading baseline language model FST: %s", str);
+
+        // Delete objects if needed
+        if (filter->lm_fst) {
+          delete filter->lm_fst;
+        }
+        if (filter->lm_compose_cache) {
+          delete filter->lm_compose_cache;
+        }
+
+        fst::script::MutableFstClass *fst =
+            fst::script::MutableFstClass::Read(str, true);
+        fst::script::Project(fst, fst::PROJECT_OUTPUT);
+
+        const fst::Fst<fst::StdArc> *tmp_fst = fst->GetFst<fst::StdArc>();
+
+        fst::VectorFst<fst::StdArc> *std_lm_fst = new fst::VectorFst<fst::StdArc>(*tmp_fst);
+
+        if (std_lm_fst->Properties(fst::kILabelSorted, true) == 0) {
+          // Make sure LM is sorted on ilabel.
+          fst::ILabelCompare<fst::StdArc> ilabel_comp;
+          fst::ArcSort(std_lm_fst, ilabel_comp);
+        }
+
+        // mapped_fst is the LM fst interpreted using the LatticeWeight semiring,
+        // with all the cost on the first member of the pair (since it's a graph
+        // weight).
+        int32 num_states_cache = 50000;
+        fst::CacheOptions cache_opts(true, num_states_cache);
+        fst::StdToLatticeMapper<BaseFloat> mapper;
+        filter->lm_fst = new fst::MapFst<fst::StdArc, LatticeArc,
+            fst::StdToLatticeMapper<BaseFloat> >(*std_lm_fst, mapper, cache_opts);
+        delete std_lm_fst;
+        delete fst;
+        // FIXME: maybe?
+        //delete tmp_fst;
+
+        // The next fifteen or so lines are a kind of optimization and
+        // can be ignored if you just want to understand what is going on.
+        // Change the options for TableCompose to match the input
+        // (because it's the arcs of the LM FST we want to do lookup
+        // on).
+        fst::TableComposeOptions compose_opts(fst::TableMatcherOptions(),
+                                              true, fst::SEQUENCE_FILTER,
+                                              fst::MATCH_INPUT);
+
+        // The following is an optimization for the TableCompose
+        // composition: it stores certain tables that enable fast
+        // lookup of arcs during composition.
+        filter->lm_compose_cache = new fst::TableComposeCache<fst::Fst<LatticeArc> >(compose_opts);
+
+        // Only change the parameter if it has worked correctly
+        g_free(filter->lm_fst_name);
+        filter->lm_fst_name = g_strdup(str);
+      } catch (std::runtime_error& e) {
+        GST_WARNING_OBJECT(filter, "Error loading the FST decoding graph: %s", str);
+      }
+    }
+
+    g_free(str);
+  } else {
+    GST_WARNING_OBJECT(filter, "lm-fst property must be a Kaldi rspecifier string. Ignoring it.");
+  }
+}
+
+static void
+gst_kaldinnet2onlinedecoder_load_big_lm(Gstkaldinnet2onlinedecoder * filter,
+                                        const GValue * value) {
+  if (G_VALUE_HOLDS_STRING(value)) {
+    gchar* str = g_value_dup_string(value);
+
+    // Check if the model filename is not empty
+    if (strcmp(str, "") != 0) {
+      try {
+        GST_DEBUG_OBJECT(filter, "Loading big language model in constant ARPA format: %s", str);
+
+        // Delete object if needed
+        if (filter->big_lm_const_arpa) {
+          delete filter->big_lm_const_arpa;
+        }
+        filter->big_lm_const_arpa = new ConstArpaLm();
+        ReadKaldiObject(str, filter->big_lm_const_arpa);
+
+        // Only change the parameter if it has worked correctly
+        g_free(filter->big_lm_const_arpa_name);
+        filter->big_lm_const_arpa_name = g_strdup(str);
+      } catch (std::runtime_error& e) {
+        GST_WARNING_OBJECT(filter, "Error loading the FST decoding graph: %s", str);
+      }
+    }
+
+    g_free(str);
+  } else {
+    GST_WARNING_OBJECT(filter, "lm-fst property must be a Kaldi rspecifier string. Ignoring it.");
+  }
+}
 
 static bool
 gst_kaldinnet2onlinedecoder_allocate(
     Gstkaldinnet2onlinedecoder * filter) {
-  if (!filter->decode_fst) {
-    GST_INFO_OBJECT(filter, "Loading Kaldi models and feature extractor");
+  GST_INFO_OBJECT(filter, "Loading Kaldi models and feature extractor");
 
-    filter->audio_source = new GstBufferSource();
+  if (!filter->audio_source) {
+      filter->audio_source = new GstBufferSource();
+  }
 
-    if (filter->feature_info == NULL) {
+  if (filter->feature_info == NULL) {
       filter->feature_info = new OnlineNnet2FeaturePipelineInfo(*(filter->feature_config));
-      filter->sample_rate = (int) filter->feature_info->mfcc_opts.frame_opts.samp_freq;
-    }
+  }
 
-    filter->sample_rate = (int) filter->feature_info->mfcc_opts.frame_opts.samp_freq;
+  filter->sample_rate = (int) filter->feature_info->mfcc_opts.frame_opts.samp_freq;
 
-    filter->trans_model = new TransitionModel();
-    filter->nnet = new nnet2::AmNnet();
-    {
-      bool binary;
-      Input ki(filter->model_rspecifier, &binary);
-      filter->trans_model->Read(ki.Stream(), binary);
-      filter->nnet->Read(ki.Stream(), binary);
-    }
-
-    filter->decode_fst = fst::ReadFstKaldi(filter->fst_rspecifier);
-
-    if (!(filter->word_syms = fst::SymbolTable::ReadText(
-        filter->word_syms_filename))) {
-      GST_ERROR_OBJECT(filter, "Could not read symbol table from file %s",
-                       filter->word_syms_filename);
-      return false;
-    }
-
+  if (!filter->adaptation_state) {
     filter->adaptation_state = new OnlineIvectorExtractorAdaptationState(
         filter->feature_info->ivector_extractor_info);
-
-    if ((strlen(filter->lm_fst_name) > 0) &&
-        (strlen(filter->big_lm_const_arpa_name) > 0)) {
-      GST_DEBUG_OBJECT(filter, "Loading models for LM rescoring with a big LM");
-      fst::script::MutableFstClass *fst =
-          fst::script::MutableFstClass::Read(filter->lm_fst_name, true);
-      fst::script::Project(fst, fst::PROJECT_OUTPUT);
-
-      const fst::Fst<fst::StdArc> *tmp_fst = fst->GetFst<fst::StdArc>();
-
-      fst::VectorFst<fst::StdArc> *std_lm_fst = new fst::VectorFst<fst::StdArc>(*tmp_fst);
-
-      if (std_lm_fst->Properties(fst::kILabelSorted, true) == 0) {
-        // Make sure LM is sorted on ilabel.
-        fst::ILabelCompare<fst::StdArc> ilabel_comp;
-        fst::ArcSort(std_lm_fst, ilabel_comp);
-      }
-
-      // mapped_fst is the LM fst interpreted using the LatticeWeight semiring,
-      // with all the cost on the first member of the pair (since it's a graph
-      // weight).
-      int32 num_states_cache = 50000;
-      fst::CacheOptions cache_opts(true, num_states_cache);
-      fst::StdToLatticeMapper<BaseFloat> mapper;
-      filter->lm_fst = new fst::MapFst<fst::StdArc, LatticeArc,
-          fst::StdToLatticeMapper<BaseFloat> >(*std_lm_fst, mapper, cache_opts);
-      delete std_lm_fst;
-      delete fst;
-      // FIXME: maybe?
-      //delete tmp_fst;
-
-      // The next fifteen or so lines are a kind of optimization and
-      // can be ignored if you just want to understand what is going on.
-      // Change the options for TableCompose to match the input
-      // (because it's the arcs of the LM FST we want to do lookup
-      // on).
-      fst::TableComposeOptions compose_opts(fst::TableMatcherOptions(),
-                                            true, fst::SEQUENCE_FILTER,
-                                            fst::MATCH_INPUT);
-
-      // The following is an optimization for the TableCompose
-      // composition: it stores certain tables that enable fast
-      // lookup of arcs during composition.
-      filter->lm_compose_cache = new fst::TableComposeCache<fst::Fst<LatticeArc> >(compose_opts);
-
-      GST_DEBUG_OBJECT(filter, "Loading big LM in constant ARPA format");
-      filter->big_lm_const_arpa = new ConstArpaLm();
-      ReadKaldiObject(filter->big_lm_const_arpa_name, filter->big_lm_const_arpa);
-
-    }
-
   }
+
   return true;
 }
 
@@ -1291,6 +1661,7 @@ static void gst_kaldinnet2onlinedecoder_finalize(GObject * object) {
   g_free(filter->model_rspecifier);
   g_free(filter->fst_rspecifier);
   g_free(filter->word_syms_filename);
+  g_free(filter->phone_syms_filename);
   delete filter->endpoint_config;
   delete filter->feature_config;
   delete filter->nnet2_decoding_config;

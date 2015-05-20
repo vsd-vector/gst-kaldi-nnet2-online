@@ -7,6 +7,19 @@ DNN acoustic models. The iVectors are adapted to the current audio stream automa
 
 # CHANGELOG
 
+2015-04-30: Added functionality to change models (FST, acoustic model,
+big language model) after initial initialization. Added functionality to 
+ouput phone aligment information (see properties `do-phone-alignment`
+and `phone-syms`). Both additions by Ricard Marxer (@rikrd).
+
+2015-04-28: Endpointing and interim recognition results now work correctly
+when using the threaded decoder. Note that endpointing does not work exactly
+the same as with the unthreaded decoder, and there might be some differences
+between individual decoder runs, but for all practical purposes it should be OK.
+Also, introduced a new property `traceback-period-in-secs`
+that specifies how often intermediate results are sent to the client (default is 0.5).
+*NB:* this update requires Kaldi revision 5036 or later.
+
 2015-03-05: Threaded decoder can now be selected at configuration time, using the
 `use-threaded-decoder` property. *NB:* this property should be set before other 
 properties. Endpointing and partial results might still not work as expected with the threaded decoder.
@@ -22,7 +35,7 @@ working on the fix.
 2015-01-09: Added language model rescoring functionality. In order to use it,
 you have to specify two properties: `lm-fst` and `big-lm-const-arpa`. The `lm-fst`
 property gives the location of the *original* LM (the one that was used fpr 
-compiling the HCLG.fst used during decodong). The `big-lm-const-arpa` property
+compiling the HCLG.fst used during decoding). The `big-lm-const-arpa` property
 gives the location of the big LM used that is used to rescore the final lattices.
 The big LM must be in the 'ConstArpaLm' format, use the Kaldi's 
 `utils/build_const_arpa_lm.sh` script to produce it from the ARPA format.
@@ -123,3 +136,17 @@ https://github.com/alumae/kaldi-gstreamer-server, in file kaldigstserver/decoder
 
 
 
+# CITING
+
+If you use this software for research, you can cite the following paper 
+(available here: http://ebooks.iospress.nl/volumearticle/37996):
+
+    @inproceedigs{alumae2014,
+      author={Tanel Alum\"{a}e},
+      title="Full-duplex Speech-to-text System for {Estonian}",
+      booktitle="Baltic HLT 2014",
+      year=2014,
+      address="Kaunas, Lihtuania"
+    }
+
+Of course, you should also acknowledge Kaldi, which does all the hard work.

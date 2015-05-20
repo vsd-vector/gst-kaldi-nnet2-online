@@ -2,6 +2,7 @@
 
 // Copyright 2015 Tilde (author: Askars Salimbajevs)
 // Copyright 2014 Tanel Alumäe
+// Copyright 2015 University of Sheffield (author: Ricard Marxer <r.marxer@sheffield.ac.uk>)
 
 // See ../COPYING for clarification regarding multiple authors
 //
@@ -68,10 +69,12 @@ struct _Gstkaldinnet2onlinedecoder {
   double last_conf;
   float lmwt_scale;
   GstBufferSource *audio_source;
+  gboolean do_phone_alignment;
 
   gchar* model_rspecifier;
   gchar* fst_rspecifier;
   gchar* word_syms_filename;
+  gchar* phone_syms_filename;
 
   SimpleOptionsGst *simple_options;
   OnlineEndpointConfig *endpoint_config;
@@ -84,10 +87,12 @@ struct _Gstkaldinnet2onlinedecoder {
   nnet2::AmNnet *nnet;
   fst::Fst<fst::StdArc> *decode_fst;
   fst::SymbolTable *word_syms;
+  fst::SymbolTable *phone_syms;
   int sample_rate;
   int nbest;
   gboolean decoding;
   float chunk_length_in_secs;
+  float traceback_period_in_secs;
   bool use_threaded_decoder;
   OnlineIvectorExtractorAdaptationState *adaptation_state;
 
@@ -104,6 +109,8 @@ struct _Gstkaldinnet2onlinedecoderClass {
   void (*partial_result)(GstElement *element, const gchar *result_str);
   void (*final_result)(GstElement *element, const gchar *result_str, float like, float confidence);
   void (*nbest_result)(GstElement *element, const gchar *result_str, float like, float confidence);
+  void (*partial_phone_alignment)(GstElement *element, const gchar *result_str);
+  void (*final_phone_alignment)(GstElement *element, const gchar *result_str);
 };
 
 GType gst_kaldinnet2onlinedecoder_get_type(void);
