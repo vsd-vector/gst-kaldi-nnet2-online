@@ -61,12 +61,14 @@ GST_DEBUG_CATEGORY_STATIC(gst_kaldinnet2onlinedecoder_debug);
 enum {
   PARTIAL_RESULT_SIGNAL,
   FINAL_RESULT_SIGNAL,
+  NBEST_RESULT_SIGNAL,
   LAST_SIGNAL
 };
 
 enum {
   PROP_0,
   PROP_SILENT,
+  PROP_NBEST,
   PROP_MODEL,
   PROP_FST,
   PROP_WORD_SYMS,
@@ -86,7 +88,7 @@ enum {
 #define DEFAULT_WORD_SYMS       "words.txt"
 #define DEFAULT_LMWT_SCALE	1.0
 #define DEFAULT_CHUNK_LENGTH_IN_SECS  0.05
-#define DEAFULT_USE_THREADED_DECODER false
+#define DEFAULT_USE_THREADED_DECODER false
 
 /* the capabilities of the inputs and outputs.
  *
@@ -159,6 +161,13 @@ static void gst_kaldinnet2onlinedecoder_class_init(
       gobject_class, PROP_SILENT,
       g_param_spec_boolean("silent", "Silent", "Silence the decoder",
       FALSE,
+                           (GParamFlags) G_PARAM_READWRITE));
+  g_object_class_install_property(
+      gobject_class, PROP_NBEST,
+      g_param_spec_uint("nbest", "NBest", "Output n-best",
+      0,
+                           G_MAXUINT,
+                           1,
                            (GParamFlags) G_PARAM_READWRITE));
   g_object_class_install_property(
       gobject_class,
@@ -251,7 +260,7 @@ static void gst_kaldinnet2onlinedecoder_class_init(
           "use-threaded-decoder",
           "Use a decoder that does feature calculation and decoding in separate threads (NB! must be set before other properties)",
           "Whether to use a threaded decoder (NB! must be set before other properties)",
-          DEAFULT_USE_THREADED_DECODER,
+          DEFAULT_USE_THREADED_DECODER,
           (GParamFlags) G_PARAM_READWRITE));
 
   gst_kaldinnet2onlinedecoder_signals[PARTIAL_RESULT_SIGNAL] = g_signal_new(
@@ -260,6 +269,13 @@ static void gst_kaldinnet2onlinedecoder_class_init(
       NULL,
       NULL, kaldi_marshal_VOID__STRING, G_TYPE_NONE, 1,
       G_TYPE_STRING);
+
+  gst_kaldinnet2onlinedecoder_signals[NBEST_RESULT_SIGNAL] = g_signal_new(
+      "nbest-result", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
+      G_STRUCT_OFFSET(Gstkaldinnet2onlinedecoderClass, nbest_result),
+      NULL,
+      NULL, kaldi_marshal_VOID__STRING_DOUBLE_DOUBLE, G_TYPE_NONE, 3,
+      G_TYPE_STRING, G_TYPE_DOUBLE, G_TYPE_DOUBLE);
 
   gst_kaldinnet2onlinedecoder_signals[FINAL_RESULT_SIGNAL] = g_signal_new(
       "final-result", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
@@ -311,6 +327,7 @@ static void gst_kaldinnet2onlinedecoder_init(
   gst_element_add_pad(GST_ELEMENT(filter), filter->srcpad);
 
   filter->silent = FALSE;
+  filter->nbest = 1;
   filter->last_conf = 0;
   filter->model_rspecifier = g_strdup(DEFAULT_MODEL);
   filter->fst_rspecifier = g_strdup(DEFAULT_FST);
@@ -328,7 +345,7 @@ static void gst_kaldinnet2onlinedecoder_init(
 
   // since the properties of the decoders overlap, they need to be set in the correct order
   // we'll redo this if the use-threaded-decoder property is changed
-  if (DEAFULT_USE_THREADED_DECODER) {
+  if (DEFAULT_USE_THREADED_DECODER) {
     filter->nnet2_decoding_config->Register(filter->simple_options);
     filter->nnet2_decoding_threaded_config->Register(filter->simple_options);
   } else {
@@ -439,6 +456,9 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
   switch (prop_id) {
     case PROP_SILENT:
       filter->silent = g_value_get_boolean(value);
+      break;
+    case PROP_NBEST:
+      filter->nbest = g_value_get_uint(value);
       break;
     case PROP_MODEL:
       g_free(filter->model_rspecifier);
@@ -564,6 +584,9 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
     case PROP_SILENT:
       g_value_set_boolean(value, filter->silent);
       break;
+    case PROP_NBEST:
+      g_value_set_uint(value, filter->nbest);
+      break;
     case PROP_MODEL:
       g_value_set_string(value, filter->model_rspecifier);
       break;
@@ -679,53 +702,66 @@ static void gst_kaldinnet2onlinedecoder_final_result(
     fst::ScaleLattice(fst::AcousticLatticeScale(inv_acoustic_scale), &clat);
   }
 
-  fst::ScaleLattice(fst::LatticeScale(filter->lmwt_scale, 1.0), &clat);
+  fst::ScaleLattice(fst::LatticeScale(filter->lmwt_scale, 1.0), &clat);  
 
-  CompactLatticeShortestPath(clat, &best_path_clat);
+  std::vector<Lattice> nbest_lats;
+  Lattice nbest_lat, lat;
+  ConvertLattice(clat, &lat);
+  fst::ShortestPath(lat, &nbest_lat, filter->nbest);
+  fst::ConvertNbestToVector(nbest_lat, &nbest_lats);
 
-  Lattice best_path_lat;
-  ConvertLattice(best_path_clat, &best_path_lat);
+//  CompactLatticeShortestPath(clat, &best_path_clat);
 
-  // get confidence
-  double conf = gst_kaldinnet2onlinedecoder_get_conf(clat);
-  filter->last_conf = conf;
+  for (int32 k = 0; k < static_cast<int32>(nbest_lats.size()); k++) {
+          
+	  Lattice best_path_lat;
+	  ConvertLattice(nbest_lats[k], &best_path_lat);
 
-  double likelihood;
-  LatticeWeight weight;
-  int32 num_frames;
-  std::vector<int32> alignment;
-  std::vector<int32> words;
-  GetLinearSymbolSequence(best_path_lat, &alignment, &words, &weight);
-  num_frames = alignment.size();
-  likelihood = -(weight.Value1() + weight.Value2());
-  *tot_num_frames += num_frames;
-  *tot_like += likelihood;
-  GST_DEBUG_OBJECT(filter, "Likelihood per frame for is %f over %d frames",
-      (likelihood / num_frames), num_frames);
+	  // get confidence
+	  double conf = gst_kaldinnet2onlinedecoder_get_conf(clat);
+	  filter->last_conf = conf;
 
-  std::stringstream sentence;
-  for (size_t i = 0; i < words.size(); i++) {
-    std::string s = filter->word_syms->Find(words[i]);
-    if (s == "")
-    GST_ERROR_OBJECT(filter, "Word-id %d not in symbol table.", words[i]);
-    if (i > 0) {
-      sentence << " ";
+	  double likelihood;
+	  LatticeWeight weight;
+	  int32 num_frames;
+	  std::vector<int32> alignment;
+	  std::vector<int32> words;
+	  GetLinearSymbolSequence(best_path_lat, &alignment, &words, &weight);
+	  num_frames = alignment.size();
+	  likelihood = -(weight.Value1() + weight.Value2());
+	  *tot_num_frames += num_frames;
+	  *tot_like += likelihood;
+	  GST_DEBUG_OBJECT(filter, "Likelihood per frame for is %f over %d frames",
+	      (likelihood / num_frames), num_frames);
+
+	  std::stringstream sentence;
+	  for (size_t i = 0; i < words.size(); i++) {
+	    std::string s = filter->word_syms->Find(words[i]);
+	    if (s == "")
+	    GST_ERROR_OBJECT(filter, "Word-id %d not in symbol table.", words[i]);
+	    if (i > 0) {
+	      sentence << " ";
+	    }
+	    sentence << s;
+	  }
+	  GST_DEBUG_OBJECT(filter, "Final: %s", sentence.str().c_str());
+
+	  guint hyp_length = sentence.str().length();
+	  *num_words = hyp_length;
+	  if (hyp_length > 0) {
+	    GstBuffer *buffer = gst_buffer_new_and_alloc(hyp_length + 1);
+	    gst_buffer_fill(buffer, 0, sentence.str().c_str(), hyp_length);
+	    gst_buffer_memset(buffer, hyp_length, '\n', 1);
+	    gst_pad_push(filter->srcpad, buffer);
+
+ 	    /* Emit a signal for applications. */
+            if (k == 0) {
+   	        g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[FINAL_RESULT_SIGNAL], 0, sentence.str().c_str(), (likelihood / num_frames), conf);
+            } else {
+                g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[NBEST_RESULT_SIGNAL], 0, sentence.str().c_str(), (likelihood / num_frames), conf);
+            }
+	  }
     }
-    sentence << s;
-  }
-  GST_DEBUG_OBJECT(filter, "Final: %s", sentence.str().c_str());
-
-  guint hyp_length = sentence.str().length();
-  *num_words = hyp_length;
-  if (hyp_length > 0) {
-    GstBuffer *buffer = gst_buffer_new_and_alloc(hyp_length + 1);
-    gst_buffer_fill(buffer, 0, sentence.str().c_str(), hyp_length);
-    gst_buffer_memset(buffer, hyp_length, '\n', 1);
-    gst_pad_push(filter->srcpad, buffer);
-
-    /* Emit a signal for applications. */
-    g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[FINAL_RESULT_SIGNAL], 0, sentence.str().c_str(), (likelihood / num_frames), conf);
-  }
 }
 
 static void gst_kaldinnet2onlinedecoder_partial_result(

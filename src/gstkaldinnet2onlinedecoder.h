@@ -85,6 +85,7 @@ struct _Gstkaldinnet2onlinedecoder {
   fst::Fst<fst::StdArc> *decode_fst;
   fst::SymbolTable *word_syms;
   int sample_rate;
+  int nbest;
   gboolean decoding;
   float chunk_length_in_secs;
   bool use_threaded_decoder;
@@ -102,6 +103,7 @@ struct _Gstkaldinnet2onlinedecoderClass {
   GstElementClass parent_class;
   void (*partial_result)(GstElement *element, const gchar *result_str);
   void (*final_result)(GstElement *element, const gchar *result_str, float like, float confidence);
+  void (*nbest_result)(GstElement *element, const gchar *result_str, float like, float confidence);
 };
 
 GType gst_kaldinnet2onlinedecoder_get_type(void);
