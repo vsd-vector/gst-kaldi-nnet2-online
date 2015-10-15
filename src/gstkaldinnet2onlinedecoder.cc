@@ -773,6 +773,7 @@ static BaseFloat gst_kaldinnet2onlinedecoder_get_conf(const CompactLattice &clat
   }
 
   return res;
+}
 
 static void gst_kaldinnet2onlinedecoder_phone_alignment(
     Gstkaldinnet2onlinedecoder * filter, const std::vector<int32>& alignment,
