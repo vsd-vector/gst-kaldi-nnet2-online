@@ -1069,7 +1069,7 @@ static std::string gst_kaldinnet2onlinedecoder_full_final_result_to_json(
     json_object_set_new(result_json_object, "hypotheses", nbest_json_arr);
   }
 
-  char *ret_strings = json_dumps(root, JSON_REAL_PRECISION(6));
+  char *ret_strings = json_dumps(root);
 
   json_decref( root );
   std::string result;
@@ -1306,12 +1306,7 @@ static void gst_kaldinnet2onlinedecoder_unthreaded_decode_segment(Gstkaldinnet2o
   OnlineSilenceWeighting silence_weighting(*(filter->trans_model),
           *(filter->silence_weighting_config));
 
-  OnlineSilenceWeighting silence_weighting(*(filter->trans_model),
-           filter->feature_info->silence_weighting_config);
-
-
   Vector<BaseFloat> wave_part = Vector<BaseFloat>(chunk_length);
-  std::vector<std::pair<int32, BaseFloat> > delta_weights;
   GST_DEBUG_OBJECT(filter, "Reading audio in %d sample chunks...",
                    wave_part.Dim());
   BaseFloat last_traceback = 0.0;
