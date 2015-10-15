@@ -129,8 +129,5 @@ bool GstBufferSource::Read(Vector<BaseFloat> *data) {
   return !((g_async_queue_length(buf_queue_) < sizeof(SampleType))
       && ended_
       && (current_buffer_ == NULL));
-  } else {
-    return false;
-  } 
 }
 }

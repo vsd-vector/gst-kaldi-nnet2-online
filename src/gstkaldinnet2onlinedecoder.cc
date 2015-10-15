@@ -1069,7 +1069,7 @@ static std::string gst_kaldinnet2onlinedecoder_full_final_result_to_json(
     json_object_set_new(result_json_object, "hypotheses", nbest_json_arr);
   }
 
-  char *ret_strings = json_dumps(root);
+  char *ret_strings = json_dumps(root, 0);
 
   json_decref( root );
   std::string result;
