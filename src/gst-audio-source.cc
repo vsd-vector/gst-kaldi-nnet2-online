@@ -74,7 +74,7 @@ void GstBufferSource::SetFlush(bool flush) {
 bool GstBufferSource::Read(Vector<BaseFloat> *data) {
   uint32 nsamples_req = data->Dim();  // (16bit) samples requested
   uint32 kDim = data->Dim();
-  int16 buf[kDim];
+  int16 *buf = new int16[kDim];
   uint32 nbytes_transferred = 0;
 
   while ((nbytes_transferred  < nsamples_req * sizeof(SampleType))) {
@@ -116,16 +116,17 @@ bool GstBufferSource::Read(Vector<BaseFloat> *data) {
     }
   }
 
-  if (!flush_) {
-    uint32 nsamples_received = nbytes_transferred / sizeof(SampleType);
-    for (int i = 0; i < nsamples_received ; ++i) {
-      (*data)(i) = static_cast<BaseFloat>(buf[i]);
-    }
-  
-    if (nsamples_received < nsamples_req) {
-      data->Resize(nsamples_received, kCopyData);
-    }
-    return !((g_async_queue_length(buf_queue_) < sizeof(SampleType))
+  uint32 nsamples_received = nbytes_transferred / sizeof(SampleType);
+  for (int i = 0; i < nsamples_received ; ++i) {
+    (*data)(i) = static_cast<BaseFloat>(buf[i]);
+  }
+
+  delete[] buf;
+
+  if (nsamples_received < nsamples_req) {
+    data->Resize(nsamples_received, kCopyData);
+  }
+  return !((g_async_queue_length(buf_queue_) < sizeof(SampleType))
       && ended_
       && (current_buffer_ == NULL));
   } else {

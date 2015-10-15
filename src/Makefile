@@ -12,17 +12,20 @@ ifneq ($(KALDI_FLAVOR), dynamic)
 $(error Kaldi must compiled with dynamic libraries support. Run configure with --shared flag. )
 endif
 
-CXXFLAGS+=-I$(KALDI_ROOT)/src
+CXXFLAGS += -I$(KALDI_ROOT)/src
 
 EXTRA_CXXFLAGS += $(shell pkg-config --cflags gstreamer-1.0)
 EXTRA_CXXFLAGS += $(shell pkg-config --cflags glib-2.0)
 
-EXTRA_LDLIBS = -lgstbase-1.0 -lgstcontroller-1.0 -lgstreamer-1.0 -lgobject-2.0 -lgmodule-2.0 -lgthread-2.0 -lglib-2.0
+EXTRA_LDLIBS += -lgstbase-1.0 -lgstcontroller-1.0 -lgobject-2.0 -lgmodule-2.0 -lgthread-2.0
+EXTRA_LDLIBS += $(shell pkg-config --libs gstreamer-1.0)
+EXTRA_LDLIBS += $(shell pkg-config --libs glib-2.0)
+EXTRA_LDLIBS += $(shell pkg-config --libs jansson)
 
 #Kaldi shared libraries required by the GStreamer plugin
 EXTRA_LDLIBS += -L$(FSTROOT)/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
  -lkaldi-gmm -lkaldi-hmm \
- -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-thread -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix -lkaldi-ivector
+ -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-thread -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix -lkaldi-ivector -lkaldi-fstext
 
 OBJFILES = gstkaldinnet2onlinedecoder.o simple-options-gst.o gst-audio-source.o kaldimarshal.o
 

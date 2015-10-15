@@ -7,6 +7,20 @@ DNN acoustic models. The iVectors are adapted to the current audio stream automa
 
 # CHANGELOG
 
+2015-06-03: Full results can now inlude word alignment information for the
+best hypothesis. In order to activate this, set the `word-boundary-file`
+property to point to the `word_boundary.int` file typically found in the
+`data/lang/phones/` subdirectory of a trained system.
+
+2015-06-02: Added functionality to output structured recognition results,
+that optionally include n-best results, phone alignment information and
+possibly other things (word alignments, sausages, lattices, sentence and
+word confidence scores) in the future.
+The structured results are pushed using the signal `full-final-result`, and
+are formatted using a JSON encoding. See below for a full description.
+Also removed the individual signals that were used for pushing out phone alignments.
+
+
 2015-04-30: Added functionality to change models (FST, acoustic model,
 big language model) after initial initialization. Added functionality to 
 ouput phone aligment information (see properties `do-phone-alignment`
@@ -63,6 +77,10 @@ In Kaldi's 'src' directory:
 Install gstreamer-1.0:
 
     sudo apt-get install gstreamer1.0-plugins-bad  gstreamer1.0-plugins-base gstreamer1.0-plugins-good  gstreamer1.0-pulseaudio  gstreamer1.0-plugins-ugly  gstreamer1.0-tools libgstreamer1.0-dev
+
+Install the Jansson library development package (version 2.7 or newer), used for encoding results as JSON:
+
+    sudo apt-get install libjansson-dev
 
 Now we can compile this plugin. Change to `src` of this project:
 
@@ -135,6 +153,217 @@ and in the project
 https://github.com/alumae/kaldi-gstreamer-server, in file kaldigstserver/decoder2.py.
 
 
+# STRUCTURED RESULTS
+
+Below is a sample of JSON-encoded full recognition results, pushed out 
+using the `full-final-result` signal. This sample was generated using
+`do-phone-alignment=true` and `num-nbest=10` (although due to pruning it 
+includes only two n-best hypotheses). Note that the words in the file specified
+by `word-syms` and the phones in the file specified in `phone-syms` must 
+be encoded using UTF-8, otherwise the output won't be valid JSON.
+
+    {
+      "status": 0,
+      "result": {
+        "hypotheses": [
+          {
+            "transcript": "we're not ready for the next epidemic",
+            "likelihood": 128.174,
+            "phone-alignment": [
+              {
+                "start": 0,
+                "phone": "SIL",
+                "length": 0.71
+              },
+              {
+                "start": 0.71,
+                "phone": "W_B",
+                "length": 0.18
+              },
+              {
+                "start": 0.89,
+                "phone": "ER_E",
+                "length": 0.06
+              },
+              {
+                "start": 0.95,
+                "phone": "N_B",
+                "length": 0.06
+              },
+              {
+                "start": 1.01,
+                "phone": "AA_I",
+                "length": 0.19
+              },
+              {
+                "start": 1.2,
+                "phone": "T_E",
+                "length": 0.11
+              },
+              {
+                "start": 1.31,
+                "phone": "R_B",
+                "length": 0.07
+              },
+              {
+                "start": 1.38,
+                "phone": "EH_I",
+                "length": 0.1
+              },
+              {
+                "start": 1.48,
+                "phone": "D_I",
+                "length": 0.05
+              },
+              {
+                "start": 1.53,
+                "phone": "IY_E",
+                "length": 0.22
+              },
+              {
+                "start": 1.75,
+                "phone": "SIL",
+                "length": 0.46
+              },
+              {
+                "start": 2.21,
+                "phone": "F_B",
+                "length": 0.1
+              },
+              {
+                "start": 2.31,
+                "phone": "ER_E",
+                "length": 0.05
+              },
+              {
+                "start": 2.36,
+                "phone": "DH_B",
+                "length": 0.05
+              },
+              {
+                "start": 2.41,
+                "phone": "AH_E",
+                "length": 0.05
+              },
+              {
+                "start": 2.46,
+                "phone": "N_B",
+                "length": 0.06
+              },
+              {
+                "start": 2.52,
+                "phone": "EH_I",
+                "length": 0.11
+              },
+              {
+                "start": 2.63,
+                "phone": "K_I",
+                "length": 0.08
+              },
+              {
+                "start": 2.71,
+                "phone": "S_I",
+                "length": 0.05
+              },
+              {
+                "start": 2.76,
+                "phone": "T_E",
+                "length": 0.07
+              },
+              {
+                "start": 2.83,
+                "phone": "EH_B",
+                "length": 0.08
+              },
+              {
+                "start": 2.91,
+                "phone": "P_I",
+                "length": 0.09
+              },
+              {
+                "start": 3,
+                "phone": "AH_I",
+                "length": 0.04
+              },
+              {
+                "start": 3.04,
+                "phone": "D_I",
+                "length": 0.08
+              },
+              {
+                "start": 3.12,
+                "phone": "EH_I",
+                "length": 0.1
+              },
+              {
+                "start": 3.22,
+                "phone": "M_I",
+                "length": 0.08
+              },
+              {
+                "start": 3.3,
+                "phone": "IH_I",
+                "length": 0.08
+              },
+              {
+                "start": 3.38,
+                "phone": "K_E",
+                "length": 0.18
+              },
+              {
+                "start": 3.56,
+                "phone": "SIL",
+                "length": 0.13
+              }
+            ],
+            "word-alignment": [
+              {
+                "word": "we're",
+                "start": 0.71,
+                "length": 0.24
+              },
+              {
+                "word": "not",
+                "start": 0.95,
+                "length": 0.36
+              },
+              {
+                "word": "ready",
+                "start": 1.31,
+                "length": 0.44
+              },
+              {
+                "word": "for",
+                "start": 2.21,
+                "length": 0.15
+              },
+              {
+                "word": "the",
+                "start": 2.36,
+                "length": 0.1
+              },
+              {
+                "word": "next",
+                "start": 2.46,
+                "length": 0.37
+              },
+              {
+                "word": "epidemic",
+                "start": 2.83,
+                "length": 0.73
+              }
+            ]
+          },
+          {
+            "transcript": "were not ready for the next epidemic",
+            "likelihood": 125.323
+          }
+        ]
+      },
+      "segment-start": 58.25,
+      "segment-length": 3.69,
+      "total-length": 61.94
+    }
 
 # CITING
 

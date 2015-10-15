@@ -36,6 +36,7 @@
 #include "fstext/fstext-lib.h"
 #include "lat/lattice-functions.h"
 #include "lm/const-arpa-lm.h"
+#include "lat/word-align-lattice.h"
 
 namespace kaldi {
 
@@ -75,12 +76,14 @@ struct _Gstkaldinnet2onlinedecoder {
   gchar* fst_rspecifier;
   gchar* word_syms_filename;
   gchar* phone_syms_filename;
+  gchar* word_boundary_info_filename;
 
   SimpleOptionsGst *simple_options;
   OnlineEndpointConfig *endpoint_config;
   OnlineNnet2FeaturePipelineConfig *feature_config;
   OnlineNnet2DecodingThreadedConfig *nnet2_decoding_threaded_config;
   OnlineNnet2DecodingConfig *nnet2_decoding_config;
+  OnlineSilenceWeightingConfig *silence_weighting_config;
 
   OnlineNnet2FeaturePipelineInfo *feature_info;
   TransitionModel *trans_model;
@@ -88,13 +91,18 @@ struct _Gstkaldinnet2onlinedecoder {
   fst::Fst<fst::StdArc> *decode_fst;
   fst::SymbolTable *word_syms;
   fst::SymbolTable *phone_syms;
+  WordBoundaryInfo *word_boundary_info;
   int sample_rate;
   int nbest;
   gboolean decoding;
   float chunk_length_in_secs;
   float traceback_period_in_secs;
   bool use_threaded_decoder;
+  guint num_nbest;
+  guint min_words_for_ivector;
   OnlineIvectorExtractorAdaptationState *adaptation_state;
+  float segment_start_time;
+  float total_time_decoded;
 
   // The following are needed for optional LM rescoring with a "big" LM
   gchar* lm_fst_name;
@@ -108,9 +116,7 @@ struct _Gstkaldinnet2onlinedecoderClass {
   GstElementClass parent_class;
   void (*partial_result)(GstElement *element, const gchar *result_str);
   void (*final_result)(GstElement *element, const gchar *result_str, float like, float confidence);
-  void (*nbest_result)(GstElement *element, const gchar *result_str, float like, float confidence);
-  void (*partial_phone_alignment)(GstElement *element, const gchar *result_str);
-  void (*final_phone_alignment)(GstElement *element, const gchar *result_str);
+  void (*full_final_result)(GstElement *element, const gchar *result_str);
 };
 
 GType gst_kaldinnet2onlinedecoder_get_type(void);
