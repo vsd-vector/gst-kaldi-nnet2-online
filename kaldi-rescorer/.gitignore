@@ -1,0 +1,3 @@
+# skip binaries
+rescorer_unix
+test/client
