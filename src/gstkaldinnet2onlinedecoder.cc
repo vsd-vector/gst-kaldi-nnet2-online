@@ -1,6 +1,5 @@
 /*
  * GStreamer
- * Copyright 2015 Tilde (author: Askars Salimbajevs)
  * Copyright 2014 Tanel Alumae <tanel.alumae@phon.ioc.ee>
  * Copyright 2014 Johns Hopkins University (author: Daniel Povey)
  * Copyright 2015 University of Sheffield (author: Ricard Marxer <r.marxer@sheffield.ac.uk>)
@@ -57,6 +56,11 @@
 
 #include <fstream>
 #include <iostream>
+#include <sstream>
+#include <istream>
+#include <streambuf>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <jansson.h>
 
@@ -99,6 +103,7 @@ enum {
   PROP_NUM_NBEST,
   PROP_WORD_BOUNDARY_FILE,
   PROP_MIN_WORDS_FOR_IVECTOR,
+  PROP_RESCORE_SOCKET,
   PROP_LAST
 };
 
@@ -114,6 +119,7 @@ enum {
 #define DEFAULT_USE_THREADED_DECODER false
 #define DEFAULT_NUM_NBEST 1
 #define DEFAULT_MIN_WORDS_FOR_IVECTOR 2
+#define DEFAULT_RESCORE_SOCKET ""
 
 /**
  * Some structs used for storing recognition results
@@ -132,6 +138,7 @@ struct _WordAlignmentInfo {
   int32 word_id;
   int32 start_frame;
   int32 length_in_frames;
+  BaseFloat confidence;
 };
 
 struct _PhoneAlignmentInfo {
@@ -400,6 +407,14 @@ static void gst_kaldinnet2onlinedecoder_class_init(
           DEFAULT_MIN_WORDS_FOR_IVECTOR,
           (GParamFlags) G_PARAM_READWRITE));
 
+  g_object_class_install_property(
+      gobject_class,
+      PROP_RESCORE_SOCKET,
+      g_param_spec_string("rescore-socket", "rescorer-worker socket (IP address or unix domain socket)",
+                          "Socket where lattice are sent to for rescoring",
+                          DEFAULT_RESCORE_SOCKET,
+                          (GParamFlags) G_PARAM_READWRITE));
+
   gst_kaldinnet2onlinedecoder_signals[PARTIAL_RESULT_SIGNAL] = g_signal_new(
       "partial-result", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
       G_STRUCT_OFFSET(Gstkaldinnet2onlinedecoderClass, partial_result),
@@ -514,6 +529,7 @@ static void gst_kaldinnet2onlinedecoder_init(
   filter->use_threaded_decoder = false;
   filter->num_nbest = DEFAULT_NUM_NBEST;
   filter->min_words_for_ivector = DEFAULT_MIN_WORDS_FOR_IVECTOR;
+  filter->rescore_socket = DEFAULT_RESCORE_SOCKET;
 
   // init properties from various Kaldi Opts
   GstElementClass * klass = GST_ELEMENT_GET_CLASS(filter);
@@ -688,6 +704,9 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
     case PROP_MIN_WORDS_FOR_IVECTOR:
       filter->min_words_for_ivector = g_value_get_uint(value);
       break;
+    case PROP_RESCORE_SOCKET:
+      filter->rescore_socket = g_value_dup_string(value);
+      break;
     default:
       if (prop_id >= PROP_LAST) {
         const gchar* name = g_param_spec_get_name(pspec);
@@ -800,6 +819,9 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
     case PROP_MIN_WORDS_FOR_IVECTOR:
       g_value_set_uint(value, filter->min_words_for_ivector);
       break;
+    case PROP_RESCORE_SOCKET:
+      g_value_set_string(value, filter->rescore_socket);
+      break;
     default:
       if (prop_id >= PROP_LAST) {
         const gchar* name = g_param_spec_get_name(pspec);
@@ -884,7 +906,7 @@ static std::vector<PhoneAlignmentInfo> gst_kaldinnet2onlinedecoder_phone_alignme
 }
 
 static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignment(
-    Gstkaldinnet2onlinedecoder * filter, const Lattice &lat) {
+    Gstkaldinnet2onlinedecoder * filter, const Lattice &lat, const CompactLattice full_lat) {
   std::vector<WordAlignmentInfo> result;
   std::vector<int32> words, times, lengths;
   CompactLattice clat;
@@ -899,9 +921,22 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
     GST_ERROR_OBJECT(filter, "Failed to do word alignment");
     return result;
   }
-  KALDI_ASSERT(words.size() == times.size() &&
-               words.size() == lengths.size());
+
+  MinimumBayesRisk mbr(full_lat, words, false);
+  std::vector<BaseFloat> conf = mbr.GetOneBestConfidences();
+
+  size_t non_epsilon_words = 0;
   for (size_t i = 0; i < words.size(); i++) {
+    if (words[i] != 0)  {
+        non_epsilon_words ++;
+    }
+  }
+
+  KALDI_ASSERT(words.size() == times.size() &&
+               words.size() == lengths.size() &&
+               non_epsilon_words == conf.size());
+
+  for (size_t i = 0, j = 0; i < words.size(); i++) {
     if (words[i] == 0)  {
       // Don't output anything for <eps> links, which
       continue; // correspond to silence....
@@ -910,7 +945,9 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
     alignment_info.word_id = words[i];
     alignment_info.start_frame = times[i];
     alignment_info.length_in_frames = lengths[i];
+    alignment_info.confidence = conf[j];
     result.push_back(alignment_info);
+    j ++; // separate counter for confidences (because we skip epsilons)
   }
   return result;
 }
@@ -995,7 +1032,7 @@ static std::vector<NBestResult> gst_kaldinnet2onlinedecoder_nbest_results(
             gst_kaldinnet2onlinedecoder_phone_alignment(filter, alignment);
       }
       if (filter->word_boundary_info) {
-        nbest_result.word_alignment = gst_kaldinnet2onlinedecoder_word_alignment(filter, nbest_lats[i]);
+        nbest_result.word_alignment = gst_kaldinnet2onlinedecoder_word_alignment(filter, nbest_lats[i], clat);
       }
     }
     nbest_results.push_back(nbest_result);
@@ -1064,6 +1101,8 @@ static std::string gst_kaldinnet2onlinedecoder_full_final_result_to_json(
                               json_real(alignment_info.start_frame * frame_shift));
           json_object_set_new(alignment_info_json_object, "length",
                               json_real(alignment_info.length_in_frames * frame_shift));
+          json_object_set_new(alignment_info_json_object, "confidence",
+                              json_real(alignment_info.confidence));
           json_array_append(word_alignment_json_arr, alignment_info_json_object);
         }
         json_object_set_new(nbest_result_json_object, "word-alignment", word_alignment_json_arr);
@@ -1092,6 +1131,9 @@ static void gst_kaldinnet2onlinedecoder_final_result(
 
   gst_kaldinnet2onlinedecoder_scale_lattice(filter, clat);
 
+  // set confidence
+  filter->last_conf = gst_kaldinnet2onlinedecoder_get_conf(clat);
+
   FullFinalResult full_final_result;
   GST_DEBUG_OBJECT(filter, "Decoding n-best results");
   full_final_result.nbest_results = gst_kaldinnet2onlinedecoder_nbest_results(filter, clat);
@@ -1110,7 +1152,6 @@ static void gst_kaldinnet2onlinedecoder_final_result(
       gst_buffer_fill(buffer, 0, best_transcript.c_str(), hyp_length);
       gst_buffer_memset(buffer, hyp_length, '\n', 1);
       gst_pad_push(filter->srcpad, buffer);
-      filter->last_conf = gst_kaldinnet2onlinedecoder_get_conf(clat);
 
       /* Emit a signal for applications. */
       g_signal_emit(filter, gst_kaldinnet2onlinedecoder_signals[FINAL_RESULT_SIGNAL], 0, best_transcript.c_str(),
@@ -1141,8 +1182,119 @@ static void gst_kaldinnet2onlinedecoder_partial_result(
   }
 }
 
+struct membuf : std::streambuf
+{
+    membuf(char* begin, char* end) {
+        this->setg(begin, begin, end);
+    }
+};
+
+static bool gst_kaldinnet2onlinedecoder_rescore_remote_unix(
+    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {  
+
+    struct sockaddr_un addr;
+    int fd;
+
+    if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+        GST_INFO_OBJECT(filter, "Unable to create socket");
+        return false;
+    }
+
+    const gchar* address = filter->rescore_socket + 2; // skip "u:"
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, address, sizeof(addr.sun_path)-1);
+
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        GST_INFO_OBJECT(filter, "Failed to connect to rescore socket");
+        return false;
+    }
+
+    std::ostringstream str;
+    WriteCompactLattice(str, true, clat);
+    size_t bytes = str.tellp();
+    char header[4];
+    *((uint32_t*)header) = htole32(bytes);
+    int bw = sizeof(header);
+
+    if (write(fd, header, bw) != bw) {
+        GST_INFO_OBJECT(filter, "Failed to write header to rescorer-socket");
+        // close socket
+        close(fd);
+        return false;
+    }
+
+    if (write(fd, str.str().c_str(), bytes) != bytes) {
+        GST_INFO_OBJECT(filter, "Failed to write lattice to rescorer-socket");
+        return false;
+    }
+
+    // now rescored lattice from socket
+    // read header
+    // TODO: handle partial header read
+    if (read(fd, header, bw) != bw) {
+        GST_INFO_OBJECT(filter, "Failed to read header from rescorer-socket");
+        // close socket
+        close(fd);
+        return false;
+    }
+
+    // extract body size from header
+    bytes = le32toh(*((uint32_t*)header));
+
+    // allocate buffer from body
+    char* buffer = new char[bytes];
+    size_t bytes_read = 0;
+    size_t bytes_left = bytes;
+    
+    // read body from socket
+    do {
+        bytes_read = read(fd, buffer+(bytes-bytes_left), bytes_left);
+        bytes_left -= bytes_read;                
+    }
+    while (bytes_read > 0 && bytes_left > 0);
+
+    if (bytes_read < 0) {
+        GST_INFO_OBJECT(filter, "Failed to read lattice from rescorer-socket");
+        // close socket
+        close(fd);
+        return false;
+    }
+
+    // close socket
+    close(fd);         
+
+    // create a stream to read CompactLattice from
+    membuf sbuf(buffer, buffer + bytes);
+    std::istream in(&sbuf);
+    CompactLattice* tmp_lat = NULL;
+    if (ReadCompactLattice(in, true, &tmp_lat)) {
+        result_lat = *tmp_lat;
+        delete tmp_lat;
+        return true;
+    } else {
+        GST_INFO_OBJECT(filter, "Failed to parse lattice");
+    }
+
+    return false; 
+
+}
+
+static bool gst_kaldinnet2onlinedecoder_rescore_remote(
+    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {  
+    
+    if (filter->rescore_socket[0] == 'u') {
+        return gst_kaldinnet2onlinedecoder_rescore_remote_unix(filter, clat, result_lat);
+    }
+
+    // FIXME: add TCP/IP socket support
+
+    return false;
+}
+
 static bool gst_kaldinnet2onlinedecoder_rescore_big_lm(
-    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {
+    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {  
 
   Lattice tmp_lattice;
   ConvertLattice(clat, &tmp_lattice);
@@ -1284,6 +1436,14 @@ static void gst_kaldinnet2onlinedecoder_threaded_decode_segment(Gstkaldinnet2onl
           clat = rescored_lat;
         }
       }
+      if (strcmp(filter->rescore_socket, "") != 0) {
+        GST_DEBUG_OBJECT(filter, "Rescoring lattice on a remote rescorer-worker");
+        CompactLattice rescored_lat;
+        if (gst_kaldinnet2onlinedecoder_rescore_remote(filter, clat, rescored_lat)) {
+          clat = rescored_lat;
+        }
+      }
+
 
       guint num_words = 0;
       gst_kaldinnet2onlinedecoder_final_result(filter, clat, &num_words);
@@ -1369,10 +1529,18 @@ static void gst_kaldinnet2onlinedecoder_unthreaded_decode_segment(Gstkaldinnet2o
         clat = rescored_lat;
       }
     }
+    if (strcmp(filter->rescore_socket, "") != 0) {
+      GST_DEBUG_OBJECT(filter, "Rescoring lattice on a remote rescorer-worker");
+      CompactLattice rescored_lat;
+      if (gst_kaldinnet2onlinedecoder_rescore_remote(filter, clat, rescored_lat)) {
+        clat = rescored_lat;
+      }
+    }
+
 
     guint num_words = 0;
     gst_kaldinnet2onlinedecoder_final_result(filter, clat, &num_words);
-    if (num_words >= filter->min_words_for_ivector) {
+    if (num_words >= filter->min_words_for_ivector && filter->last_conf > 0.3) {
       // Only update adaptation state if the utterance contained enough words
       feature_pipeline.GetAdaptationState(filter->adaptation_state);
     }
