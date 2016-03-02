@@ -62,8 +62,6 @@ LatticeRescoreTask::LatticeRescoreTask(
        computed_(false), 
        success_(false),
        outlat_(NULL)  { 
-    reload_lm_fst();
-    create_compose_cache();
 }
 
 /**
@@ -107,6 +105,9 @@ void LatticeRescoreTask::create_compose_cache() {
 }
 
 void LatticeRescoreTask::operator () () {
+
+    reload_lm_fst();
+    create_compose_cache();
 
     outlat_ = new CompactLattice();
     if ( rescore_lattice(inlat_, outlat_)) {
