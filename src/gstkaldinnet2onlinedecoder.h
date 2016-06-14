@@ -1,6 +1,6 @@
 // gstkaldinnet2onlinedecoder.h
 
-// Copyright 2015 Tilde (author: Askars Salimbajevs)
+// Copyright 2016 Askars Salimbajevs
 // Copyright 2014 Tanel Alumäe
 // Copyright 2015 University of Sheffield (author: Ricard Marxer <r.marxer@sheffield.ac.uk>)
 
@@ -26,6 +26,7 @@
 
 #include "./simple-options-gst.h"
 #include "./gst-audio-source.h"
+#include "./remote-rescore.h"
 
 #include "online2/online-nnet2-decoding-threaded.h"
 #include "online2/online-nnet2-decoding.h"
@@ -111,6 +112,8 @@ struct _Gstkaldinnet2onlinedecoder {
   fst::MapFst<fst::StdArc, LatticeArc, fst::StdToLatticeMapper<BaseFloat> > *lm_fst;
   fst::TableComposeCache<fst::Fst<LatticeArc> > *lm_compose_cache;
   ConstArpaLm *big_lm_const_arpa;
+  const gchar* rescore_socket; // rescoring in remote process
+  RemoteRescore* remote_rescore = NULL;
 };
 
 struct _Gstkaldinnet2onlinedecoderClass {

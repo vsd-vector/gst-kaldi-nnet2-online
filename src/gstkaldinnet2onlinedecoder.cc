@@ -1,5 +1,6 @@
 /*
  * GStreamer
+ * Copyright 2016 Askars Salimbajevs
  * Copyright 2014 Tanel Alumae <tanel.alumae@phon.ioc.ee>
  * Copyright 2014 Johns Hopkins University (author: Daniel Povey)
  * Copyright 2015 University of Sheffield (author: Ricard Marxer <r.marxer@sheffield.ac.uk>)
@@ -56,11 +57,7 @@
 
 #include <fstream>
 #include <iostream>
-#include <sstream>
-#include <istream>
-#include <streambuf>
-#include <sys/socket.h>
-#include <sys/un.h>
+#include <string>
 
 #include <jansson.h>
 
@@ -609,6 +606,10 @@ static void gst_kaldinnet2onlinedecoder_init(
   }
 }
 
+static void gst_kaldinnet2onlinedecoder_rescore_remote_log(std::string msg) {
+    KALDI_ERR << msg;
+}
+
 static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
                                                      guint prop_id,
                                                      const GValue * value,
@@ -706,6 +707,12 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
       break;
     case PROP_RESCORE_SOCKET:
       filter->rescore_socket = g_value_dup_string(value);
+
+      if (filter->remote_rescore != NULL) {
+          delete filter->remote_rescore;
+      }
+      filter->remote_rescore = new RemoteRescore(std::string(filter->rescore_socket),    
+                                                 &gst_kaldinnet2onlinedecoder_rescore_remote_log);
       break;
     default:
       if (prop_id >= PROP_LAST) {
@@ -926,6 +933,7 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
   std::vector<BaseFloat> conf = mbr.GetOneBestConfidences();
 
   size_t non_epsilon_words = 0;
+
   for (size_t i = 0; i < words.size(); i++) {
     if (words[i] != 0)  {
         non_epsilon_words ++;
@@ -1182,113 +1190,12 @@ static void gst_kaldinnet2onlinedecoder_partial_result(
   }
 }
 
-struct membuf : std::streambuf
-{
-    membuf(char* begin, char* end) {
-        this->setg(begin, begin, end);
-    }
-};
-
-static bool gst_kaldinnet2onlinedecoder_rescore_remote_unix(
-    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {  
-
-    struct sockaddr_un addr;
-    int fd;
-
-    if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-        GST_INFO_OBJECT(filter, "Unable to create socket");
-        return false;
-    }
-
-    const gchar* address = filter->rescore_socket + 2; // skip "u:"
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, address, sizeof(addr.sun_path)-1);
-
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-        GST_INFO_OBJECT(filter, "Failed to connect to rescore socket");
-        return false;
-    }
-
-    std::ostringstream str;
-    WriteCompactLattice(str, true, clat);
-    size_t bytes = str.tellp();
-    char header[4];
-    *((uint32_t*)header) = htole32(bytes);
-    int bw = sizeof(header);
-
-    if (write(fd, header, bw) != bw) {
-        GST_INFO_OBJECT(filter, "Failed to write header to rescorer-socket");
-        // close socket
-        close(fd);
-        return false;
-    }
-
-    if (write(fd, str.str().c_str(), bytes) != bytes) {
-        GST_INFO_OBJECT(filter, "Failed to write lattice to rescorer-socket");
-        return false;
-    }
-
-    // now rescored lattice from socket
-    // read header
-    // TODO: handle partial header read
-    if (read(fd, header, bw) != bw) {
-        GST_INFO_OBJECT(filter, "Failed to read header from rescorer-socket");
-        // close socket
-        close(fd);
-        return false;
-    }
-
-    // extract body size from header
-    bytes = le32toh(*((uint32_t*)header));
-
-    // allocate buffer from body
-    char* buffer = new char[bytes];
-    size_t bytes_read = 0;
-    size_t bytes_left = bytes;
-    
-    // read body from socket
-    do {
-        bytes_read = read(fd, buffer+(bytes-bytes_left), bytes_left);
-        bytes_left -= bytes_read;                
-    }
-    while (bytes_read > 0 && bytes_left > 0);
-
-    if (bytes_read < 0) {
-        GST_INFO_OBJECT(filter, "Failed to read lattice from rescorer-socket");
-        // close socket
-        close(fd);
-        return false;
-    }
-
-    // close socket
-    close(fd);         
-
-    // create a stream to read CompactLattice from
-    membuf sbuf(buffer, buffer + bytes);
-    std::istream in(&sbuf);
-    CompactLattice* tmp_lat = NULL;
-    if (ReadCompactLattice(in, true, &tmp_lat)) {
-        result_lat = *tmp_lat;
-        delete tmp_lat;
-        return true;
-    } else {
-        GST_INFO_OBJECT(filter, "Failed to parse lattice");
-    }
-
-    return false; 
-
-}
-
 static bool gst_kaldinnet2onlinedecoder_rescore_remote(
     Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {  
     
-    if (filter->rescore_socket[0] == 'u') {
-        return gst_kaldinnet2onlinedecoder_rescore_remote_unix(filter, clat, result_lat);
+    if (filter->remote_rescore) {
+        return filter->remote_rescore->rescore(clat, result_lat);
     }
-
-    // FIXME: add TCP/IP socket support
 
     return false;
 }
