@@ -1,5 +1,6 @@
 /*
  * GStreamer
+ * Copyright 2016 Askars Salimbajevs
  * Copyright 2014 Tanel Alumae <tanel.alumae@phon.ioc.ee>
  * Copyright 2014 Johns Hopkins University (author: Daniel Povey)
  * Copyright 2015 University of Sheffield (author: Ricard Marxer <r.marxer@sheffield.ac.uk>)
@@ -55,6 +56,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <string>
 
 #include <jansson.h>
 
@@ -97,6 +99,7 @@ enum {
   PROP_NUM_NBEST,
   PROP_WORD_BOUNDARY_FILE,
   PROP_MIN_WORDS_FOR_IVECTOR,
+  PROP_RESCORE_SOCKET,
   PROP_LAST
 };
 
@@ -108,9 +111,10 @@ enum {
 #define DEFAULT_LMWT_SCALE	1.0
 #define DEFAULT_CHUNK_LENGTH_IN_SECS  0.05
 #define DEFAULT_TRACEBACK_PERIOD_IN_SECS  0.5
-#define DEAFULT_USE_THREADED_DECODER false
+#define DEFAULT_USE_THREADED_DECODER false
 #define DEFAULT_NUM_NBEST 1
 #define DEFAULT_MIN_WORDS_FOR_IVECTOR 2
+#define DEFAULT_RESCORE_SOCKET ""
 
 /**
  * Some structs used for storing recognition results
@@ -149,7 +153,6 @@ struct _FullFinalResult {
   std::vector<NBestResult> nbest_results;
   std::string phone_alignment;
 };
-
 
 /* the capabilities of the inputs and outputs.
  *
@@ -373,7 +376,7 @@ static void gst_kaldinnet2onlinedecoder_class_init(
           "use-threaded-decoder",
           "Use a decoder that does feature calculation and decoding in separate threads (NB! must be set before other properties)",
           "Whether to use a threaded decoder (NB! must be set before other properties)",
-          DEAFULT_USE_THREADED_DECODER,
+          DEFAULT_USE_THREADED_DECODER,
           (GParamFlags) G_PARAM_READWRITE));
 
   g_object_class_install_property(
@@ -398,12 +401,21 @@ static void gst_kaldinnet2onlinedecoder_class_init(
           DEFAULT_MIN_WORDS_FOR_IVECTOR,
           (GParamFlags) G_PARAM_READWRITE));
 
+  g_object_class_install_property(
+      gobject_class,
+      PROP_RESCORE_SOCKET,
+      g_param_spec_string("rescore-socket", "rescorer-worker socket (IP address or unix domain socket)",
+                          "Socket where lattice are sent to for rescoring",
+                          DEFAULT_RESCORE_SOCKET,
+                          (GParamFlags) G_PARAM_READWRITE));
+
   gst_kaldinnet2onlinedecoder_signals[PARTIAL_RESULT_SIGNAL] = g_signal_new(
       "partial-result", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
       G_STRUCT_OFFSET(Gstkaldinnet2onlinedecoderClass, partial_result),
       NULL,
       NULL, kaldi_marshal_VOID__STRING, G_TYPE_NONE, 1,
       G_TYPE_STRING);
+
 
   gst_kaldinnet2onlinedecoder_signals[FINAL_RESULT_SIGNAL] = g_signal_new(
       "final-result", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
@@ -488,7 +500,7 @@ static void gst_kaldinnet2onlinedecoder_init(
 
   // since the properties of the decoders overlap, they need to be set in the correct order
   // we'll redo this if the use-threaded-decoder property is changed
-  if (DEAFULT_USE_THREADED_DECODER) {
+  if (DEFAULT_USE_THREADED_DECODER) {
     filter->nnet2_decoding_config->Register(filter->simple_options);
     filter->nnet2_decoding_threaded_config->Register(filter->simple_options);
   } else {
@@ -510,6 +522,7 @@ static void gst_kaldinnet2onlinedecoder_init(
   filter->use_threaded_decoder = false;
   filter->num_nbest = DEFAULT_NUM_NBEST;
   filter->min_words_for_ivector = DEFAULT_MIN_WORDS_FOR_IVECTOR;
+  filter->rescore_socket = DEFAULT_RESCORE_SOCKET;
 
   // init properties from various Kaldi Opts
   GstElementClass * klass = GST_ELEMENT_GET_CLASS(filter);
@@ -587,6 +600,10 @@ static void gst_kaldinnet2onlinedecoder_init(
     }
     i += 1;
   }
+}
+
+static void gst_kaldinnet2onlinedecoder_rescore_remote_log(std::string msg) {
+    KALDI_ERR << msg;
 }
 
 static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
@@ -683,6 +700,14 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
       break;
     case PROP_MIN_WORDS_FOR_IVECTOR:
       filter->min_words_for_ivector = g_value_get_uint(value);
+      break;
+    case PROP_RESCORE_SOCKET:
+      filter->rescore_socket = g_value_dup_string(value);
+      if (filter->remote_rescore != NULL) {
+          delete filter->remote_rescore;
+      }
+      filter->remote_rescore = new RemoteRescore(std::string(filter->rescore_socket),    
+                                                 &gst_kaldinnet2onlinedecoder_rescore_remote_log);
       break;
     default:
       if (prop_id >= PROP_LAST) {
@@ -796,6 +821,9 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
     case PROP_MIN_WORDS_FOR_IVECTOR:
       g_value_set_uint(value, filter->min_words_for_ivector);
       break;
+    case PROP_RESCORE_SOCKET:
+      g_value_set_string(value, filter->rescore_socket);
+      break;
     default:
       if (prop_id >= PROP_LAST) {
         const gchar* name = g_param_spec_get_name(pspec);
@@ -882,8 +910,11 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
     GST_ERROR_OBJECT(filter, "Failed to do word alignment");
     return result;
   }
+
   KALDI_ASSERT(words.size() == times.size() &&
                words.size() == lengths.size());
+
+
   for (size_t i = 0; i < words.size(); i++) {
     if (words[i] == 0)  {
       // Don't output anything for <eps> links, which
@@ -1122,8 +1153,18 @@ static void gst_kaldinnet2onlinedecoder_partial_result(
   }
 }
 
+static bool gst_kaldinnet2onlinedecoder_rescore_remote(
+    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {  
+    
+    if (filter->remote_rescore) {
+        return filter->remote_rescore->rescore(clat, result_lat);
+    }
+
+    return false;
+}
+
 static bool gst_kaldinnet2onlinedecoder_rescore_big_lm(
-    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {
+    Gstkaldinnet2onlinedecoder * filter, CompactLattice &clat, CompactLattice &result_lat) {  
 
   Lattice tmp_lattice;
   ConvertLattice(clat, &tmp_lattice);
@@ -1265,6 +1306,14 @@ static void gst_kaldinnet2onlinedecoder_threaded_decode_segment(Gstkaldinnet2onl
           clat = rescored_lat;
         }
       }
+      if (strcmp(filter->rescore_socket, "") != 0) {
+        GST_DEBUG_OBJECT(filter, "Rescoring lattice on a remote rescorer-worker");
+        CompactLattice rescored_lat;
+        if (gst_kaldinnet2onlinedecoder_rescore_remote(filter, clat, rescored_lat)) {
+          clat = rescored_lat;
+        }
+      }
+
 
       guint num_words = 0;
       gst_kaldinnet2onlinedecoder_final_result(filter, clat, &num_words);
@@ -1350,6 +1399,14 @@ static void gst_kaldinnet2onlinedecoder_unthreaded_decode_segment(Gstkaldinnet2o
         clat = rescored_lat;
       }
     }
+    if (strcmp(filter->rescore_socket, "") != 0) {
+      GST_DEBUG_OBJECT(filter, "Rescoring lattice on a remote rescorer-worker");
+      CompactLattice rescored_lat;
+      if (gst_kaldinnet2onlinedecoder_rescore_remote(filter, clat, rescored_lat)) {
+        clat = rescored_lat;
+      }
+    }
+
 
     guint num_words = 0;
     gst_kaldinnet2onlinedecoder_final_result(filter, clat, &num_words);
@@ -1409,6 +1466,7 @@ gst_kaldinnet2onlinedecoder_query (GstPad *pad, GstObject * parent, GstQuery * q
         filter->feature_info = new OnlineNnet2FeaturePipelineInfo(*(filter->feature_config));
         filter->sample_rate = (int) filter->feature_info->mfcc_opts.frame_opts.samp_freq;
       }
+
       GstCaps *new_caps = gst_caps_new_simple ("audio/x-raw",
             "format", G_TYPE_STRING, "S16LE",
             "rate", G_TYPE_INT, filter->sample_rate,
