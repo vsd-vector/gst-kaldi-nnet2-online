@@ -705,9 +705,12 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
       filter->rescore_socket = g_value_dup_string(value);
       if (filter->remote_rescore != NULL) {
           delete filter->remote_rescore;
+          filter->remote_rescore == NULL;
       }
-      filter->remote_rescore = new RemoteRescore(std::string(filter->rescore_socket),    
-                                                 &gst_kaldinnet2onlinedecoder_rescore_remote_log);
+      if (strcmp(filter->rescore_socket, "") != 0) {
+          filter->remote_rescore = new RemoteRescore(std::string(filter->rescore_socket),    
+                                                     &gst_kaldinnet2onlinedecoder_rescore_remote_log);
+      }
       break;
     default:
       if (prop_id >= PROP_LAST) {
