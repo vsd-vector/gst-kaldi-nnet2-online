@@ -140,7 +140,7 @@ public:
     : io_service_(io_service),
       acceptor_(io_service, stream_protocol::endpoint(file)),
       dispatcher_(dispatcher)
-  {    
+  { 
     session_ptr new_session(new rescore_session(io_service_, dispatcher_));
     acceptor_.async_accept(new_session->socket(),
         boost::bind(&server::handle_accept, this, new_session,
@@ -187,6 +187,9 @@ int main(int argc, char* argv[])
     std::string socket = po.GetArg(1),
         rescore_lm = po.GetArg(2),
         lm_fst = po.GetArg(3);
+
+    // unbind address
+    unlink(socket.c_str());
 
     // load dispatcher
     rescore_dispatch* dispatch = new rescore_dispatch(sequencer_config, rescore_lm, lm_fst);
