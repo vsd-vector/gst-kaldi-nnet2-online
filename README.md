@@ -6,6 +6,8 @@ DNN acoustic models. The iVectors are adapted to the current audio stream automa
 
 
 # CHANGELOG
+2016-06-23: Got rid of the GStreamer property warnings at startup, thanks to @MathieuDuponchelle.
+
 2015-11-05: Minor changes for compatibility with Ubuntu 12.04 (and its older version
 of Jansson). Also use `ReadDecodeGraph` to read fst file, supporting the use of
 const (mapped) fsts.
@@ -105,19 +107,7 @@ Test if GStreamer can access the plugin:
 
     GST_PLUGIN_PATH=. gst-inspect-1.0 kaldinnet2onlinedecoder
 
-First, this prints a lot of warnings like:
-
-    (gst-inspect-1.0:10810): GLib-GObject-WARNING **: Attempt to add property Gstkaldinnet2onlinedecoder::endpoint-silence-phones after class was initialised
-
-    (gst-inspect-1.0:10810): GLib-GObject-WARNING **: Attempt to add property Gstkaldinnet2onlinedecoder::endpoint-rule1-must-contain-nonsilence after class was initialised
-
-    (gst-inspect-1.0:10810): GLib-GObject-WARNING **: Attempt to add property Gstkaldinnet2onlinedecoder::endpoint-rule1-min-trailing-silence after class was initialised
-
-This is because the properties of the plugin are initialized dynamically from Kaldi components
-and the Kaldi components are created after plugin initialization. It doesn't seem
-to harm any functinality.
-
-The second part of the `gst-inspect-1.0` output should list all plugin properties with their default values:
+The output should list all plugin properties with their default values:
 
     Factory Details:
       Rank                     none (0)
@@ -383,7 +373,7 @@ If you use this software for research, you can cite the following paper
       title="Full-duplex Speech-to-text System for {Estonian}",
       booktitle="Baltic HLT 2014",
       year=2014,
-      address="Kaunas, Lihtuania"
+      address="Kaunas, Lithuania"
     }
 
 Of course, you should also acknowledge Kaldi, which does all the hard work.
