@@ -1,8 +1,10 @@
 # WHAT IT IS
 
-
 GStreamer plugin that wraps Kaldi's SingleUtteranceNnet2Decoder. It requires iVector-adapted
 DNN acoustic models. The iVectors are adapted to the current audio stream automatically.
+
+This is a fork of a gst-kaldi-nnet2-online which adds the ability to perform latt
+ice rescoring in a separate process.
 
 
 # CHANGELOG
