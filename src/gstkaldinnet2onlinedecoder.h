@@ -107,7 +107,6 @@ struct _Gstkaldinnet2onlinedecoder {
 
   // The following are needed for optional LM rescoring with a "big" LM
   gchar* lm_fst_name;
-  const gchar* rescore_socket;
   gchar* big_lm_const_arpa_name;
   fst::MapFst<fst::StdArc, LatticeArc, fst::StdToLatticeMapper<BaseFloat> > *lm_fst;
   fst::TableComposeCache<fst::Fst<LatticeArc> > *lm_compose_cache;
