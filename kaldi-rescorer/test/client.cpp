@@ -13,6 +13,8 @@
 #include <iostream>
 #include <boost/asio.hpp>
 
+#include "../rescore_message.hpp"
+
 #if defined(BOOST_ASIO_HAS_LOCAL_SOCKETS)
 
 using boost::asio::local::stream_protocol;
@@ -37,11 +39,16 @@ int main(int argc, char* argv[])
     using namespace std; // For strlen.
 
     char buffer[max_length];
-    char header[8];
     FILE * filp = fopen("lat1", "rb"); 
     size_t request_length = fread(buffer, sizeof(char), max_length, filp);
-    sprintf(header, "%zd", request_length);
-    boost::asio::write(s, boost::asio::buffer(header, 8));
+
+    rescore_message *out = new rescore_message();
+    out->body_length(request_length);   
+    out->encode_header();
+
+    // send header
+    boost::asio::write(s, boost::asio::buffer(out->data(), 4));
+    // send buffer
     boost::asio::write(s, boost::asio::buffer(buffer, request_length));
 
     char reply[max_length];

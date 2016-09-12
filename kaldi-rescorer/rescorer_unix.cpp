@@ -52,7 +52,6 @@ public:
 
   void start()
   {
-    //room_.join(shared_from_this());
     boost::asio::async_read(socket_,
         boost::asio::buffer(read_msg_.data(), rescore_message::header_length),
         boost::bind(
@@ -82,6 +81,17 @@ public:
           boost::asio::buffer(read_msg_.body(), read_msg_.body_length()),
           boost::bind(&rescore_session::handle_read_body, shared_from_this(),
             boost::asio::placeholders::error));
+    } else {
+      // reply with error msg
+      rescore_message *out = new rescore_message();
+      out->body_length(3);
+      out->body()[0] = 'E';
+      out->body()[1] = 'E';
+      out->body()[2] = 'R';
+      out->encode_header();
+      deliver(out);
+      // wait for next header
+      start();
     }
   }
 
@@ -91,10 +101,8 @@ public:
     {
       // process read_msg_ and rescore
       dispatcher_->rescore(read_msg_, shared_from_this());
-      boost::asio::async_read(socket_,
-          boost::asio::buffer(read_msg_.data(), rescore_message::header_length),
-          boost::bind(&rescore_session::handle_read_header, shared_from_this(),
-            boost::asio::placeholders::error));
+      // wait for next header
+      start();
     }
   }
 

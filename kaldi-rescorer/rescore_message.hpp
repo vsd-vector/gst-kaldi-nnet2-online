@@ -11,17 +11,19 @@
 #include <cstdlib>
 #include <stdint.h>
 #include <cstring>
+#include <sstream>
+#include <stdexcept>
 
 class rescore_message
 {
 public:
-  enum { header_length = 4 };
-  enum { max_body_length = 1024*1024*10 };
+  enum { header_length = 4 }; // 4 bytes
+  enum { max_body_length = 1024*1024*100 }; // size limit for sanity (100MB)
 
   rescore_message()
     : body_length_(0)
   {
-      data_ = new char[header_length];
+      data_ = new char[header_length + max_body_length];
   }
 
   ~rescore_message() 
@@ -61,12 +63,9 @@ public:
 
   void body_length(size_t new_length)
   {   
-    if (new_length > max_body_length)
+    if (new_length > max_body_length) {
       new_length = max_body_length;
-
-    if (new_length > body_length_) {
-      delete[] data_;
-      data_ = new char[header_length + new_length];
+      throw std::runtime_error("Can not allocate buffer for message body. Body size > MAX");
     }
 
     body_length_ = new_length;
@@ -91,6 +90,10 @@ public:
   void encode_header()
   {
       *((uint32_t*)data_) = htole32(body_length_);
+  }
+
+  void set_body_from_stream(std::ostringstream str) {
+      memcpy(body(), str.str().c_str(), body_length_);
   }
 
 private:

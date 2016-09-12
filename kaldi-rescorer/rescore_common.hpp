@@ -10,7 +10,7 @@
 #define RESCORE_COMMON_HPP
 
 #include <boost/shared_ptr.hpp>
-
+#include <stdexcept>
 #include "rescore_message.hpp"
 
 class rescore_job

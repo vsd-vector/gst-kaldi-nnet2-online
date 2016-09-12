@@ -44,6 +44,11 @@ namespace kaldi {
         *((uint32_t*)header) = htole32(size_of_lattice);
         int size_of_header = sizeof(header);
 
+        if (size_of_lattice > max_lattice_size) {
+            error_log_func("Failed to write lattice to rescore socket. Lattice too big.");
+            return false;
+        }
+
         if (send_bytes(header, size_of_header) == false) {
             error_log_func("Failed to write header to rescore socket");
             return false;
@@ -92,7 +97,6 @@ namespace kaldi {
     bool RemoteRescore::rescore(CompactLattice &lat, CompactLattice &rescored_lat) {
         // connect to rescorer
         if (! connect_socket()) {
-            error_log_func("Failed to connect to rescore socket");
             return false;
         }
 

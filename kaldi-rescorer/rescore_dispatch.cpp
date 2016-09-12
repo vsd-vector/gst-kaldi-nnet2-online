@@ -1,4 +1,5 @@
 #include <boost/interprocess/streams/bufferstream.hpp>
+#include <sstream>
 
 #include "rescore_common.hpp"
 #include "rescore_message.hpp"
@@ -111,8 +112,6 @@ void LatticeRescoreTask::operator () () {
 
     outlat_ = new CompactLattice();
     if ( rescore_lattice(inlat_, outlat_)) {
-        delete inlat_; // inlat_ is no longer needed, free allocated memory
-
         // We'll write the lattice without acoustic scaling.
         if (acoustic_scale_ != 0.0) {
             fst::ScaleLattice(fst::AcousticLatticeScale(1.0 / acoustic_scale_), outlat_);
@@ -131,9 +130,19 @@ void LatticeRescoreTask::operator () () {
     rescore_message *out = new rescore_message();
     out->body_length(out->max_body_length);        
     obufferstream str(out->body(), out->body_length());
-    WriteCompactLattice(str, true, *outlat_);
+    if (! WriteCompactLattice(str, true, *outlat_) ) {
+        KALDI_WARN << "Failed to write lattice. Stream pos: " << str.tellp();
+        // reset buffer
+        str.buffer(out->body(), out->body_length());
+        // send the unrescored lattice back
+        WriteCompactLattice(str, true, *inlat_);
+        out->body_length(str.tellp());
+    }
     out->body_length(str.tellp());
     out->encode_header();
+
+    delete inlat_; // inlat_ is no longer needed, free allocated memory
+
     session_->deliver(out); // session will take ownership of the message
 }
 

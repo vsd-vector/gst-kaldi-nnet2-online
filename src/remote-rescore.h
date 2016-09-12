@@ -31,6 +31,7 @@ namespace kaldi {
 // Lattice rescoring in separate "remote" process
 class RemoteRescore {
     public:
+    enum { max_lattice_size = 1024*1024*100 }; // size limit for sanity (100MB)
 
     RemoteRescore(std::string address);
     RemoteRescore(std::string address, void (*error_log_func)(std::string msg));
