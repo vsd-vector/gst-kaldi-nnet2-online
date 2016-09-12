@@ -1,3 +1,4 @@
 # skip binaries
 rescorer_unix
 test/client
+test/lat.out
