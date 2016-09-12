@@ -75,23 +75,26 @@ public:
 
   void handle_read_header(const boost::system::error_code& error)
   {
-    if (!error && read_msg_.decode_header())
+    if (!error)
     {
-      boost::asio::async_read(socket_,
+      if (! read_msg_.decode_header()) {
+        KALDI_WARN << "Failed to read lattice from client. Lattice too big?";
+        // reply with error msg
+        rescore_message *out = new rescore_message();
+        out->body_length(3);
+        out->body()[0] = 'E';
+        out->body()[1] = 'E';
+        out->body()[2] = 'R';
+        out->encode_header();
+        deliver(out);
+        // disconnect
+        close();
+      } else {
+        boost::asio::async_read(socket_,
           boost::asio::buffer(read_msg_.body(), read_msg_.body_length()),
           boost::bind(&rescore_session::handle_read_body, shared_from_this(),
             boost::asio::placeholders::error));
-    } else {
-      // reply with error msg
-      rescore_message *out = new rescore_message();
-      out->body_length(3);
-      out->body()[0] = 'E';
-      out->body()[1] = 'E';
-      out->body()[2] = 'R';
-      out->encode_header();
-      deliver(out);
-      // wait for next header
-      start();
+      }
     }
   }
 
