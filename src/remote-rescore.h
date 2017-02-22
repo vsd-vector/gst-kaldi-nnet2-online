@@ -23,6 +23,7 @@
 #include <streambuf>
 #include <string>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include "lat/lattice-functions.h"
 
 namespace kaldi {
@@ -45,7 +46,7 @@ class RemoteRescore {
     protected:
 
     int fd;
-    struct sockaddr* addr = NULL;
+    struct sockaddr_un addr;
 
     bool process_address (std::string address);
     bool connect_socket ();

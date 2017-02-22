@@ -22,7 +22,6 @@
 #include <sstream>
 #include <istream>
 #include <sys/socket.h>
-#include <sys/un.h>
 
 namespace kaldi {
 
@@ -123,7 +122,7 @@ namespace kaldi {
     }
 
     RemoteRescore::~RemoteRescore() {
-        delete addr;
+        // destructor
     }
 
 
@@ -131,13 +130,9 @@ namespace kaldi {
         const char* c_addr = address.c_str() + 2; // skip "u:" or "t:"
 
         if (address[0] == 'u') {
-            if (addr) {
-                delete addr;
-            }
-            sockaddr_un *t_addr = new sockaddr_un();
-            t_addr->sun_family = AF_UNIX;
-            strncpy(t_addr->sun_path, c_addr, sizeof(t_addr->sun_path)-1);
-            addr = (sockaddr*) t_addr;
+            memset(&addr, 0, sizeof(addr));            
+            addr.sun_family = AF_UNIX;
+            strncpy(addr.sun_path, c_addr, sizeof(addr.sun_path)-1);
         } else {
             error_log_func("Unable to create rescore socket. Protocol not implemented");
         }
@@ -150,7 +145,7 @@ namespace kaldi {
             error_log_func("Unable to create rescore socket");
             return false;
         }
-        if (connect(fd, addr, sizeof(addr)) == -1) {
+        if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
             error_log_func("Failed to connect to rescore socket");
             return false;
         }
