@@ -1,13 +1,17 @@
 # WHAT IT IS
 
-GStreamer plugin that wraps Kaldi's SingleUtteranceNnet2Decoder. It requires iVector-adapted
-DNN acoustic models. The iVectors are adapted to the current audio stream automatically.
+This is a fork of a gst-kaldi-nnet2-online which adds the ability to perform lattice rescoring in a separate process.
 
-This is a fork of a gst-kaldi-nnet2-online which adds the ability to perform latt
-ice rescoring in a separate process.
-
+GStreamer plugin that wraps Kaldi's SingleUtteranceNnet2Decoder. It requires iVector-adapted DNN acoustic models. The iVectors are adapted to the current audio stream automatically.
 
 # CHANGELOG
+2017-02-23: Now works with the latest Kaldi (also requires very fresh Kaldi). This also means
+that LSTM nnet3 models (including chain models) are supported (not tested).
+
+2016-10-14: Support for nnet3 (including 'chain') models, thanks to @yifan! Not tested very carefully.
+Set the `nnet-mode` property to 3 to use nnet3 models. Note that this property must be set before the other
+properties.
+
 2016-06-23: Got rid of the GStreamer property warnings at startup, thanks to @MathieuDuponchelle.
 
 2015-11-05: Minor changes for compatibility with Ubuntu 12.04 (and its older version
