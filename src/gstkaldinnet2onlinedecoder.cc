@@ -54,6 +54,8 @@
 #include "lat/sausages.h"
 #include "lat/confidence.h"
 #include "hmm/hmm-utils.h"
+#include "nnet3/nnet-utils.h"
+
 #include <fst/script/project.h>
 
 #include <fstream>
@@ -1924,6 +1926,8 @@ gst_kaldinnet2onlinedecoder_load_model(Gstkaldinnet2onlinedecoder * filter,
         }
         else {
           filter->am_nnet3->Read(ki.Stream(), binary);
+          SetBatchnormTestMode(true, &(filter->am_nnet3->GetNnet()));
+          SetDropoutTestMode(true, &(filter->am_nnet3->GetNnet()));
           // this object contains precomputed stuff that is used by all decodable
           // objects.  It takes a pointer to am_nnet because if it has iVectors it has
           // to modify the nnet to accept iVectors at intervals.
@@ -1957,7 +1961,7 @@ gst_kaldinnet2onlinedecoder_load_fst(Gstkaldinnet2onlinedecoder * filter,
       try {
         GST_DEBUG_OBJECT(filter, "Loading decoder graph: %s", str);
 
-        fst::Fst<fst::StdArc> * new_decode_fst = ReadDecodeGraph(str);
+        fst::Fst<fst::StdArc> * new_decode_fst = fst::ReadFstKaldiGeneric(str);
 
         // Delete objects if needed
         if (filter->decode_fst) {
