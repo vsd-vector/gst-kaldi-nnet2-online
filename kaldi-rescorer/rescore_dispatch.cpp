@@ -6,7 +6,7 @@
 #include "rescore_dispatch.hpp"
 
 #include "base/kaldi-common.h"
-#include "thread/kaldi-task-sequence.h"
+#include "util/kaldi-thread.h"
 #include "lat/lattice-functions.h"
 #include "lm/const-arpa-lm.h"
 #include <fst/script/project.h>
@@ -79,9 +79,10 @@ void LatticeRescoreTask::reload_lm_fst() {
     // weight).
     int32 num_states_cache = 50000;
     fst::CacheOptions cache_opts(true, num_states_cache);
+    fst::MapFstOptions mapfst_opts(cache_opts);
     fst::StdToLatticeMapper<BaseFloat> mapper;
     lm_fst_ = new fst::MapFst<fst::StdArc, LatticeArc,
-        fst::StdToLatticeMapper<BaseFloat> >(*std_lm_fst_, mapper, cache_opts);
+        fst::StdToLatticeMapper<BaseFloat> >(*std_lm_fst_, mapper, mapfst_opts);
 }
 
 /**

@@ -17,9 +17,9 @@ CXXFLAGS+=-I$(KALDI_ROOT)/src
 CXXFLAGS+=-I /usr/lib/boost/include
 
 # Kaldi shared libraries
-EXTRA_LDLIBS += -L$(FSTROOT)/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
+EXTRA_LDLIBS += -L$(KALDI_ROOT)/tools/openfst/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
  -lkaldi-gmm -lkaldi-hmm \
- -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-thread -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix \
+ -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix \
  -lkaldi-ivector
 
 # Boost
