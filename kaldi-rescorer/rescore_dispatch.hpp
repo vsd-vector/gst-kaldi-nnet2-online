@@ -1,6 +1,6 @@
 #include "base/kaldi-common.h"
 #include "util/parse-options.h"
-#include "thread/kaldi-task-sequence.h"
+#include "util/kaldi-thread.h"
 
 #include "rescore_common.hpp"
 #include "rescore_message.hpp"
