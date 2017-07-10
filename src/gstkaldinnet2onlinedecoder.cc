@@ -1532,7 +1532,8 @@ static void gst_kaldinnet2onlinedecoder_nnet3_unthreaded_decode_segment(Gstkaldi
                                       *(filter->decode_fst),
                                       &feature_pipeline);
   OnlineSilenceWeighting silence_weighting(*(filter->trans_model),
-          *(filter->silence_weighting_config));
+          *(filter->silence_weighting_config),
+          filter->nnet3_decodable_opts->frame_subsampling_factor);
 
   Vector<BaseFloat> wave_part = Vector<BaseFloat>(chunk_length);
   GST_DEBUG_OBJECT(filter, "Reading audio in %d sample chunks...",
