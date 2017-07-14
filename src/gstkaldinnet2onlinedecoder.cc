@@ -932,7 +932,9 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
 
 static BaseFloat gst_kaldinnet2onlinedecoder_get_conf(const CompactLattice &clat) {
 
-  MinimumBayesRisk mbr(clat,false);
+  MinimumBayesRiskOptions mbr_opts;
+  mbr_opts.decode_mbr = false;
+  MinimumBayesRisk mbr(clat, mbr_opts);
   std::vector<BaseFloat> conf = mbr.GetOneBestConfidences();
 
   BaseFloat res = 1;
@@ -990,7 +992,9 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
     return result;
   }
 
-  MinimumBayesRisk mbr(full_lat, words, false);
+  MinimumBayesRiskOptions mbr_opts;
+  mbr_opts.decode_mbr = false;
+  MinimumBayesRisk mbr(full_lat, words, mbr_opts);
   std::vector<BaseFloat> conf = mbr.GetOneBestConfidences();
 
   size_t non_epsilon_words = 0;
