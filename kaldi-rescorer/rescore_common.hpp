@@ -10,8 +10,17 @@
 #define RESCORE_COMMON_HPP
 
 #include <boost/shared_ptr.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <stdexcept>
 #include "rescore_message.hpp"
+#include <string>
+
+
+namespace pt = boost::posix_time;
+
+std::string current_time() {
+    return pt::to_simple_string(pt::second_clock::local_time());
+}
 
 class rescore_job
 {

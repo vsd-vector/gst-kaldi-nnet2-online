@@ -51,7 +51,7 @@ public:
   }
 
   void start()
-  {
+  {   
     boost::asio::async_read(socket_,
         boost::asio::buffer(read_msg_.data(), rescore_message::header_length),
         boost::bind(
@@ -63,8 +63,10 @@ public:
   {
     bool write_in_progress = !write_msgs_.empty();
     write_msgs_.push_back(boost::shared_ptr<rescore_message>(msg));
+    KALDI_LOG << current_time() << ": sending rescored lattice back (write_in_progress = " << write_in_progress << ")";
     if (!write_in_progress)
     {
+      KALDI_LOG << current_time() << ": will send buffer of size " << write_msgs_.front()->length();
       boost::asio::async_write(socket_,
           boost::asio::buffer(write_msgs_.front()->data(),
             write_msgs_.front()->length()),
@@ -90,6 +92,7 @@ public:
         // disconnect
         close();
       } else {
+        KALDI_LOG << current_time() << ": starting to receive lattice of size " << read_msg_.body_length();
         boost::asio::async_read(socket_,
           boost::asio::buffer(read_msg_.body(), read_msg_.body_length()),
           boost::bind(&rescore_session::handle_read_body, shared_from_this(),
@@ -102,6 +105,7 @@ public:
   {
     if (!error)
     {
+      KALDI_LOG << current_time() << ": lattice of size " << read_msg_.body_length() << " received. Rescoring...";
       // process read_msg_ and rescore
       dispatcher_->rescore(read_msg_, shared_from_this());
       // wait for next header
@@ -120,6 +124,7 @@ public:
       // continue sending
       if (!write_msgs_.empty())
       {
+        KALDI_LOG << current_time() << ": will send buffer of size " << write_msgs_.front()->length();
         boost::asio::async_write(socket_,
             boost::asio::buffer(write_msgs_.front()->data(),
               write_msgs_.front()->length()),
@@ -127,7 +132,7 @@ public:
               boost::asio::placeholders::error));
       }
     } else {
-        KALDI_WARN << "Failed to send lattice to client. Error code: " << error.message();
+        KALDI_WARN << current_time() << ": failed to send lattice to client. Error code: " << error.message();
     }
   }
 

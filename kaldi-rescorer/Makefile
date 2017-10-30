@@ -23,7 +23,7 @@ EXTRA_LDLIBS += -L$(KALDI_ROOT)/tools/openfst/lib -lkaldi-online2 -lkaldi-lat -l
  -lkaldi-ivector
 
 # Boost
-EXTRA_LDLIBS += -lboost_system 
+EXTRA_LDLIBS += -lboost_system -lboost_date_time
 
 OBJFILES = rescorer_unix.o rescore_dispatch.o
 
