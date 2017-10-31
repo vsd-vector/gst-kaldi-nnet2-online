@@ -2,7 +2,7 @@
 // rescore_common
 // ~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2015 Askars Salimbajevs (SIA Tilde)
+// Copyright (c) 2017 Askars Salimbajevs (SIA Tilde)
 //
 //
 
@@ -11,15 +11,13 @@
 
 #include <boost/shared_ptr.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
+#include <string>
 #include <stdexcept>
 #include "rescore_message.hpp"
-#include <string>
 
 
-namespace pt = boost::posix_time;
-
-std::string current_time() {
-    return pt::to_simple_string(pt::second_clock::local_time());
+inline std::string current_time() {
+    return boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time());
 }
 
 class rescore_job
