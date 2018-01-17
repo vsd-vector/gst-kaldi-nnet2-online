@@ -55,6 +55,7 @@
 #include "lat/confidence.h"
 #include "hmm/hmm-utils.h"
 #include "nnet3/nnet-utils.h"
+#include "lat/sausages.h"
 
 #include <fst/script/project.h>
 
@@ -102,6 +103,7 @@ enum {
   PROP_BIG_LM_CONST_ARPA,
   PROP_USE_THREADED_DECODER,
   PROP_NUM_NBEST,
+  PROP_NUM_PHONE_ALIGNMENT,
   PROP_WORD_BOUNDARY_FILE,
   PROP_MIN_WORDS_FOR_IVECTOR,
   PROP_RESCORE_SOCKET,
@@ -120,6 +122,7 @@ enum {
 #define DEFAULT_TRACEBACK_PERIOD_IN_SECS  0.5
 #define DEFAULT_USE_THREADED_DECODER false
 #define DEFAULT_NUM_NBEST 1
+#define DEFAULT_NUM_PHONE_ALIGNMENT 1
 #define DEFAULT_MIN_WORDS_FOR_IVECTOR 2
 #define DEFAULT_RESCORE_SOCKET ""
 
@@ -140,13 +143,14 @@ struct _WordAlignmentInfo {
   int32 word_id;
   int32 start_frame;
   int32 length_in_frames;
-  BaseFloat confidence;
+  double confidence;
 };
 
 struct _PhoneAlignmentInfo {
   int32 phone_id;
   int32 start_frame;
   int32 length_in_frames;
+  double confidence;
 };
 
 struct _NBestResult {
@@ -410,6 +414,17 @@ static void gst_kaldinnet2onlinedecoder_class_init(
 
   g_object_class_install_property(
       gobject_class,
+      PROP_NUM_PHONE_ALIGNMENT,
+      g_param_spec_uint(
+          "num-phone-alignment", "num-phone-alignment",
+          "number of hypotheses where alignment should be done",
+          1,
+          10000,
+          DEFAULT_NUM_PHONE_ALIGNMENT,
+          (GParamFlags) G_PARAM_READWRITE));
+
+  g_object_class_install_property(
+      gobject_class,
       PROP_MIN_WORDS_FOR_IVECTOR,
       g_param_spec_uint(
           "min-words-for-ivector", "threshold for updating ivector (adaptation state)",
@@ -506,6 +521,7 @@ static void gst_kaldinnet2onlinedecoder_init(
   filter->word_boundary_info_filename = g_strdup(DEFAULT_WORD_BOUNDARY_FILE);
 
   filter->do_phone_alignment = false;
+  filter->num_phone_alignment = 1;
 
   filter->simple_options = new SimpleOptionsGst();
 
@@ -757,6 +773,9 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
     case PROP_NUM_NBEST:
       filter->num_nbest = g_value_get_uint(value);
       break;
+    case PROP_NUM_PHONE_ALIGNMENT:
+      filter->num_phone_alignment = g_value_get_uint(value);
+      break;
     case PROP_MIN_WORDS_FOR_IVECTOR:
       filter->min_words_for_ivector = g_value_get_uint(value);
       break;
@@ -884,6 +903,9 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
     case PROP_NUM_NBEST:
       g_value_set_uint(value, filter->num_nbest);
       break;
+    case PROP_NUM_PHONE_ALIGNMENT:
+      g_value_set_uint(value, filter->num_phone_alignment);
+      break;
     case PROP_MIN_WORDS_FOR_IVECTOR:
       g_value_set_uint(value, filter->min_words_for_ivector);
       break;
@@ -946,7 +968,8 @@ static BaseFloat gst_kaldinnet2onlinedecoder_get_conf(const CompactLattice &clat
 }
 
 static std::vector<PhoneAlignmentInfo> gst_kaldinnet2onlinedecoder_phone_alignment(
-    Gstkaldinnet2onlinedecoder * filter, const std::vector<int32>& alignment) {
+    Gstkaldinnet2onlinedecoder * filter, const std::vector<int32>& alignment, 
+    const CompactLattice &clat) {
 
   std::vector<PhoneAlignmentInfo> result;
 
@@ -958,6 +981,24 @@ static std::vector<PhoneAlignmentInfo> gst_kaldinnet2onlinedecoder_phone_alignme
 
   GST_DEBUG_OBJECT(filter, "Split to phones finished");
 
+  std::vector<int32> phones;
+  for (size_t i = 0; i < split.size(); i++) {
+    KALDI_ASSERT(split[i].size() > 0);
+    phones.push_back(filter->trans_model->TransitionIdToPhone(split[i][0]));
+  }
+  Lattice lat;
+  ConvertLattice(clat, &lat);
+  ConvertLatticeToPhones(*filter->trans_model, &lat);
+  CompactLattice phone_clat;
+  ConvertLattice(lat, &phone_clat);  
+  MinimumBayesRiskOptions mbr_opts;
+  mbr_opts.decode_mbr = false; // we just want confidences
+  mbr_opts.print_silence = false; 
+  MinimumBayesRisk *mbr = new MinimumBayesRisk(phone_clat, phones, mbr_opts);
+  std::vector<BaseFloat> confidences = mbr->GetOneBestConfidences();
+  delete mbr;
+  
+
   int32 current_start_frame = 0;
 
   for (size_t i = 0; i < split.size(); i++) {
@@ -968,6 +1009,9 @@ static std::vector<PhoneAlignmentInfo> gst_kaldinnet2onlinedecoder_phone_alignme
     alignment_info.phone_id = phone;
     alignment_info.start_frame = current_start_frame;
     alignment_info.length_in_frames = split[i].size();
+    if (confidences.size() > 0) {
+      alignment_info.confidence = confidences[i];
+    }
 
     result.push_back(alignment_info);
     current_start_frame += split[i].size();
@@ -976,7 +1020,8 @@ static std::vector<PhoneAlignmentInfo> gst_kaldinnet2onlinedecoder_phone_alignme
 }
 
 static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignment(
-    Gstkaldinnet2onlinedecoder * filter, const Lattice &lat, const CompactLattice full_lat) {
+    Gstkaldinnet2onlinedecoder * filter, const Lattice &lat, 
+    const std::vector<BaseFloat> &confidences) {
   std::vector<WordAlignmentInfo> result;
   std::vector<int32> words, times, lengths;
   CompactLattice clat;
@@ -991,23 +1036,10 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
     GST_ERROR_OBJECT(filter, "Failed to do word alignment");
     return result;
   }
-
-  MinimumBayesRiskOptions mbr_opts;
-  mbr_opts.decode_mbr = false;
-  MinimumBayesRisk mbr(full_lat, words, mbr_opts);
-  std::vector<BaseFloat> conf = mbr.GetOneBestConfidences();
-
-  size_t non_epsilon_words = 0;
-
-  for (size_t i = 0; i < words.size(); i++) {
-    if (words[i] != 0)  {
-        non_epsilon_words ++;
-    }
-  }
-
   KALDI_ASSERT(words.size() == times.size() &&
-               words.size() == lengths.size() &&
-               non_epsilon_words == conf.size());
+               words.size() == lengths.size());
+  int confidence_i = 0;
+>>>>>>> af564840c4e6eef27be46ccedeefbed467cc95b3
 
   for (size_t i = 0, j = 0; i < words.size(); i++) {
     if (words[i] == 0)  {
@@ -1018,7 +1050,9 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
     alignment_info.word_id = words[i];
     alignment_info.start_frame = times[i];
     alignment_info.length_in_frames = lengths[i];
-    alignment_info.confidence = conf[j];
+    if (confidences.size() > 0) {
+      alignment_info.confidence = confidences[confidence_i++];
+    }
     result.push_back(alignment_info);
     j ++; // separate counter for confidences (because we skip epsilons)
   }
@@ -1103,14 +1137,20 @@ static std::vector<NBestResult> gst_kaldinnet2onlinedecoder_nbest_results(
       word_in_hyp.word_id = words[j];
       nbest_result.words.push_back(word_in_hyp);
     }
-    if (i == 0) {
-      if (filter->do_phone_alignment) {
+    if (filter->do_phone_alignment) {
+      if (i < filter->num_phone_alignment) {
         nbest_result.phone_alignment =
-            gst_kaldinnet2onlinedecoder_phone_alignment(filter, alignment);
+            gst_kaldinnet2onlinedecoder_phone_alignment(filter, alignment, clat);
       }
-      if (filter->word_boundary_info) {
-        nbest_result.word_alignment = gst_kaldinnet2onlinedecoder_word_alignment(filter, nbest_lats[i], clat);
-      }
+    }
+    if (filter->word_boundary_info) {
+      MinimumBayesRiskOptions mbr_opts;
+      mbr_opts.decode_mbr = false; // we just want confidences
+      mbr_opts.print_silence = false; 
+      MinimumBayesRisk *mbr = new MinimumBayesRisk(clat, words, mbr_opts);
+      std::vector<BaseFloat> confidences = mbr->GetOneBestConfidences();
+      delete mbr;
+      nbest_result.word_alignment = gst_kaldinnet2onlinedecoder_word_alignment(filter, nbest_lats[i], confidences);
     }
     nbest_results.push_back(nbest_result);
   }
@@ -1164,6 +1204,8 @@ static std::string gst_kaldinnet2onlinedecoder_full_final_result_to_json(
                                 json_real(alignment_info.start_frame * frame_shift));
             json_object_set_new(alignment_info_json_object, "length",
                                 json_real(alignment_info.length_in_frames * frame_shift));
+            json_object_set_new(alignment_info_json_object, "confidence",
+                                json_real(alignment_info.confidence));
             json_array_append(phone_alignment_json_arr, alignment_info_json_object);
           }
           json_object_set_new(nbest_result_json_object, "phone-alignment", phone_alignment_json_arr);
