@@ -1039,7 +1039,6 @@ static std::vector<WordAlignmentInfo>  gst_kaldinnet2onlinedecoder_word_alignmen
   KALDI_ASSERT(words.size() == times.size() &&
                words.size() == lengths.size());
   int confidence_i = 0;
->>>>>>> af564840c4e6eef27be46ccedeefbed467cc95b3
 
   for (size_t i = 0, j = 0; i < words.size(); i++) {
     if (words[i] == 0)  {
