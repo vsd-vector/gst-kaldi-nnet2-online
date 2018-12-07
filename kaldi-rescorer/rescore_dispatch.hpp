@@ -8,15 +8,17 @@
 using namespace kaldi;
 
 
-class rescore_dispatch {
+class RescoreDispatch {
 
 public:
 
-    rescore_dispatch(TaskSequencerConfig &sequencer_config, std::string rescore_lm_rspecifier, std::string lm_fst_rspecifier);
+    RescoreDispatch(TaskSequencerConfig &sequencer_config, 
+        std::string rescore_lm_rspecifier, 
+        std::string lm_fst_rspecifier);
 
-    ~rescore_dispatch();
+    ~RescoreDispatch();
      
-    void rescore(const rescore_message& msg, rescore_job_ptr const session);
+    void rescore(const RescoreMessage& msg, RescoreJobPtr const session);
 
 private:
    class impl;    

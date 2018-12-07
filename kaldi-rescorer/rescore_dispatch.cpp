@@ -20,7 +20,7 @@ class LatticeRescoreTask {
     // Initializer sets various variables.
     LatticeRescoreTask(
         CompactLattice* lattice,
-        rescore_job_ptr session,
+        RescoreJobPtr session,
         ConstArpaLm* rescore_lm,
         fst::VectorFst<fst::StdArc>* std_lm_fst,
         BaseFloat acoustic_scale);  
@@ -34,7 +34,7 @@ class LatticeRescoreTask {
 
     // The following variables correspond to inputs:
     CompactLattice* inlat_; // Stored input.
-    rescore_job_ptr session_;
+    RescoreJobPtr session_;
     BaseFloat acoustic_scale_;
     // models and stuff
     ConstArpaLm* rescore_lm_;
@@ -49,7 +49,7 @@ class LatticeRescoreTask {
 
 LatticeRescoreTask::LatticeRescoreTask(
     CompactLattice* lattice,
-    rescore_job_ptr session,
+    RescoreJobPtr session,
     ConstArpaLm* rescore_lm,
     fst::VectorFst<fst::StdArc>* std_lm_fst,
     BaseFloat acoustic_scale)
@@ -128,7 +128,7 @@ void LatticeRescoreTask::operator () () {
     computed_ = true;
 
     // Output lattice        
-    rescore_message *out = new rescore_message();
+    RescoreMessage *out = new RescoreMessage();
     out->body_length(out->max_body_length);        
     obufferstream str(out->body(), out->body_length());
     if (! WriteCompactLattice(str, true, *outlat_) ) {
@@ -151,6 +151,7 @@ void LatticeRescoreTask::operator () () {
 *** Rescore lattice
 **/
 bool LatticeRescoreTask::rescore_lattice(CompactLattice* clat, CompactLattice* result_lat) {
+  // This here is roughly from lattice-lmrescore-const-arpa.cc
 
   Lattice tmp_lattice;
   ConvertLattice(*clat, &tmp_lattice);
@@ -216,13 +217,11 @@ LatticeRescoreTask::~LatticeRescoreTask() {
 }
 
 
-
-class rescore_dispatch::impl {
-
-
+class RescoreDispatch::impl {
 public:
-
-    impl(TaskSequencerConfig sequencer_config, std::string rescore_lm_rspecifier, std::string lm_fst_rspecifier) 
+    impl(TaskSequencerConfig sequencer_config, 
+        std::string rescore_lm_rspecifier, 
+        std::string lm_fst_rspecifier) 
         : sequencer(sequencer_config), 
           acoustic_scale(0)
     {
@@ -232,11 +231,11 @@ public:
         load_lm_fst(lm_fst_rspecifier);
     };
      
-    void rescore(const rescore_message& msg, rescore_job_ptr const session) {
+    void rescore(const RescoreMessage& msg, RescoreJobPtr const session) {
         ibufferstream input_stream(msg.body(), msg.body_length());
         CompactLattice *lat = NULL;
+
         if (ReadCompactLattice(input_stream, true, &lat)) {
-            
             // rescore lattice
             // LatticeRescoreTask will take ownership of lat
             LatticeRescoreTask *task =
@@ -259,9 +258,7 @@ private:
     ConstArpaLm* rescore_lm_;
     fst::VectorFst<fst::StdArc> *std_lm_fst_;
 
-
     void load_lm_fst(std::string lm_fst_file) {
-
         try {
             fst::script::MutableFstClass *fst =
                 fst::script::MutableFstClass::Read(lm_fst_file, true);
@@ -279,8 +276,6 @@ private:
 
             //delete std_lm_fst;
             delete fst;
-
-
          } catch (std::runtime_error& e) {
             KALDI_ERR << "Error loading the FST decoding graph: " << lm_fst_file;
          }
@@ -288,15 +283,17 @@ private:
 };
 
 
-rescore_dispatch::rescore_dispatch(TaskSequencerConfig &sequencer_config, std::string rescore_lm_rspecifier, std::string lm_fst_rspecifier) 
-:pimpl(new impl(sequencer_config, rescore_lm_rspecifier, lm_fst_rspecifier))
+RescoreDispatch::RescoreDispatch(TaskSequencerConfig &sequencer_config,
+    std::string rescore_lm_rspecifier,
+    std::string lm_fst_rspecifier) 
+    : pimpl(new impl(sequencer_config, rescore_lm_rspecifier, lm_fst_rspecifier))
 {
 }
 
-rescore_dispatch::~rescore_dispatch() {
+RescoreDispatch::~RescoreDispatch() {
     delete pimpl;
 }
 
-void rescore_dispatch::rescore(const rescore_message& msg, rescore_job_ptr const session) {
+void RescoreDispatch::rescore(const RescoreMessage& msg, RescoreJobPtr const session) {
     pimpl->rescore(msg, session);
 }

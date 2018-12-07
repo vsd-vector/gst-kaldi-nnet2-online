@@ -14,19 +14,19 @@
 #include <sstream>
 #include <stdexcept>
 
-class rescore_message
+class RescoreMessage
 {
 public:
   enum { header_length = 4 }; // 4 bytes
   enum { max_body_length = 1024*1024*100 }; // size limit for sanity (100MB)
 
-  rescore_message()
+  RescoreMessage()
     : body_length_(0)
   {
       data_ = new char[header_length + max_body_length];
   }
 
-  ~rescore_message() 
+  ~RescoreMessage() 
   {
       delete[] data_;
   }
