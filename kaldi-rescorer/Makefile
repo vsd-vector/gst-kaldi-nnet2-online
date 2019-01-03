@@ -20,7 +20,7 @@ CXXFLAGS+=-I /usr/lib/boost/include
 EXTRA_LDLIBS += -L$(KALDI_ROOT)/tools/openfst/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
  -lkaldi-gmm -lkaldi-hmm \
  -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix \
- -lkaldi-ivector
+ -lkaldi-ivector -lkaldi-nnet3 -lkaldi-rnnlm
 
 # Boost
 EXTRA_LDLIBS += -lboost_system -lboost_date_time

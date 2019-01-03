@@ -10,7 +10,9 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <stdint.h>
 #include <iostream>
+#include <fstream>
 #include <boost/asio.hpp>
 
 #include "../rescore_message.hpp"
@@ -19,30 +21,35 @@
 
 using boost::asio::local::stream_protocol;
 
-enum { max_length = 1024*1024 };
+//enum { max_length = 1024*1024*10 };
 
 int main(int argc, char* argv[])
 {
   try
   {
-    if (argc != 2)
+    if (argc != 4)
     {
-      std::cerr << "Usage: stream_client <file>\n";
+      std::cerr << "Usage: stream_client <socket_file> <in_lattice_file> <out_lattice_file>\n";
       return 1;
     }
+    size_t max_length = 1024 * 1024 * 10;
 
     boost::asio::io_service io_service;
 
     stream_protocol::socket s(io_service);
     s.connect(stream_protocol::endpoint(argv[1]));
+    std::cout << "connected to endpoint: " << argv[1] << std::endl;
 
     using namespace std; // For strlen.
 
-    char buffer[max_length];
-    FILE * filp = fopen("lat1", "rb"); 
-    size_t request_length = fread(buffer, sizeof(char), max_length, filp);
+    char *buffer = new char[max_length];
+    FILE * filp = fopen(argv[2], "rb");
 
-    rescore_message *out = new rescore_message();
+    size_t request_length = fread(buffer, sizeof(char), max_length, filp);
+    fclose(filp);
+    std::cout << "request_length: " << request_length << std::endl;
+
+    RescoreMessage *out = new RescoreMessage();
     out->body_length(request_length);   
     out->encode_header();
 
@@ -51,12 +58,25 @@ int main(int argc, char* argv[])
     // send buffer
     boost::asio::write(s, boost::asio::buffer(buffer, request_length));
 
-    char reply[max_length];
-    size_t reply_length = boost::asio::read(s,
-        boost::asio::buffer(reply, request_length));
-    std::cout << "Reply is: ";
-    std::cout.write(reply, reply_length);
-    std::cout << "\n";
+    char *reply_header = new char[4];
+    std::cout << "reading reply header..." << std::endl;
+    boost::asio::read(s, boost::asio::buffer(reply_header, 4));
+    size_t body_length = le32toh(*((uint32_t*)reply_header));
+    std::cout << "body length: " << body_length << std::endl;
+
+    char *reply = new char[max_length];
+    std::cout << "reading reply body..." << std::endl;
+    size_t reply_length = boost::asio::read(s, boost::asio::buffer(reply, body_length));
+    std::cout << "Read " << reply_length << " bytes..." << std::endl;
+
+    // write rescored lattice to disk
+    std::ofstream output(argv[3], std::ofstream::binary);
+    output.write(reply, reply_length);
+    output.close();
+
+    // cleanup, altho arguably useless at enf of program, is good to keep in mind
+    delete [] buffer;
+    delete [] reply;
   }
   catch (std::exception& e)
   {

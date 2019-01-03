@@ -64,7 +64,6 @@ public:
   void body_length(size_t new_length)
   {   
     if (new_length > max_body_length) {
-      new_length = max_body_length;
       throw std::runtime_error("Can not allocate buffer for message body. Body size > MAX");
     }
 
