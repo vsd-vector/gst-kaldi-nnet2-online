@@ -17,7 +17,7 @@ CXXFLAGS+=-I$(KALDI_ROOT)/src
 CXXFLAGS+=-I /usr/lib/boost/include
 
 # Kaldi shared libraries
-EXTRA_LDLIBS += -L$(KALDI_ROOT)/tools/openfst/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
+EXTRA_LDLIBS += -L$(KALDI_ROOT)/src/lib -L$(KALDI_ROOT)/tools/openfst/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
  -lkaldi-gmm -lkaldi-hmm \
  -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix \
  -lkaldi-ivector
@@ -46,7 +46,7 @@ EXTRA_LDLIBS +=  -Wl,--no-as-needed -Wl,-rpath=$(KALDILIBDIR) -lrt -pthread
 $(BINFILES): $(OBJFILES)
 
 .o:
-	$(CXX) -DPIC -o $@ -L$(KALDILIBDIR) $(EXTRA_LDLIBS) $(LDLIBS) $(LDFLAGS) \
+	$(CXX) -DPIC -o $@ $(EXTRA_LDLIBS) $(LDLIBS) $(LDFLAGS) \
 	  $(OBJFILES)
 
 clean: 
