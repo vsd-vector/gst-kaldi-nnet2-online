@@ -13,14 +13,15 @@ ifneq ($(KALDI_FLAVOR), dynamic)
 $(error Kaldi must compiled with dynamic libraries support. Run configure with --shared flag. )
 endif
 
+CXXFLAGS = -g -O0
 CXXFLAGS+=-I$(KALDI_ROOT)/src
 CXXFLAGS+=-I /usr/lib/boost/include
 
 # Kaldi shared libraries
-EXTRA_LDLIBS += -L$(FSTROOT)/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
- -lkaldi-gmm -lkaldi-hmm \
- -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-thread -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix \
- -lkaldi-ivector
+#EXTRA_LDLIBS += -L$(FSTROOT)/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
+# -lkaldi-gmm -lkaldi-hmm \
+# -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-thread -lkaldi-lm -lfstscript -lkaldi-nnet2 -lkaldi-cudamatrix \
+# -lkaldi-ivector
 
 # Boost
 EXTRA_LDLIBS += -lboost_system 

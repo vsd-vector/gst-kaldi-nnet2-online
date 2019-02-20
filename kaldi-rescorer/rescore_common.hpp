@@ -20,14 +20,14 @@ inline std::string current_time() {
     return boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time());
 }
 
-class rescore_job
+class RescoreJob
 {
 public:
-  virtual ~rescore_job() {}
-  virtual void deliver(rescore_message* msg) = 0;
+  virtual ~RescoreJob() {}
+  virtual void deliver(RescoreMessage* msg) = 0;
   virtual void close() = 0;
 };
 
-typedef boost::shared_ptr<rescore_job> rescore_job_ptr;
+typedef boost::shared_ptr<RescoreJob> RescoreJobPtr;
 
 #endif // RESCORE_COMMON_HPP

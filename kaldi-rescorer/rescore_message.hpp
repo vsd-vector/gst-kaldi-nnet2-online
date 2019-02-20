@@ -14,19 +14,19 @@
 #include <sstream>
 #include <stdexcept>
 
-class rescore_message
+class RescoreMessage
 {
 public:
   enum { header_length = 4 }; // 4 bytes
   enum { max_body_length = 1024*1024*100 }; // size limit for sanity (100MB)
 
-  rescore_message()
+  RescoreMessage()
     : body_length_(0)
   {
       data_ = new char[header_length + max_body_length];
   }
 
-  ~rescore_message() 
+  ~RescoreMessage() 
   {
       delete[] data_;
   }
@@ -64,7 +64,6 @@ public:
   void body_length(size_t new_length)
   {   
     if (new_length > max_body_length) {
-      new_length = max_body_length;
       throw std::runtime_error("Can not allocate buffer for message body. Body size > MAX");
     }
 

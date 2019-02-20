@@ -1,5 +1,5 @@
 //
-// rescore_server.cpp
+// rescorer_unix.cpp
 // ~~~~~~~~~~~~~~~
 //
 // Copyright (c) 2015 Askars Salimbajevs (SIA Tilde)
@@ -26,16 +26,17 @@ using boost::asio::local::stream_protocol;
 
 //----------------------------------------------------------------------
 
-typedef std::deque<boost::shared_ptr<rescore_message> > rescore_message_queue;
+typedef std::deque<boost::shared_ptr<RescoreMessage> > RescoreMessageQueue;
 
 //----------------------------------------------------------------------
 
-class rescore_session
-  : public rescore_job,
-    public boost::enable_shared_from_this<rescore_session>
+class RescoreSession
+  : public RescoreJob,
+    public boost::enable_shared_from_this<RescoreSession>
 {
 public:
-  rescore_session(boost::asio::io_service& io_service, rescore_dispatch* dispatcher)
+  RescoreSession(boost::asio::io_service& io_service, 
+    RescoreDispatch* dispatcher)
     : socket_(io_service), 
       dispatcher_(dispatcher)
   {
@@ -46,23 +47,22 @@ public:
     return socket_;
   }
 
-  void close() {
+  void close() override {
       socket_.close();
   }
 
   void start()
   {   
     boost::asio::async_read(socket_,
-        boost::asio::buffer(read_msg_.data(), rescore_message::header_length),
+        boost::asio::buffer(read_msg_.data(), RescoreMessage::header_length),
         boost::bind(
-          &rescore_session::handle_read_header, shared_from_this(),
+          &RescoreSession::handle_read_header, shared_from_this(),
           boost::asio::placeholders::error));
   }
 
-  void deliver(rescore_message* msg)
-  {
+  void deliver(RescoreMessage* msg) override {
     bool write_in_progress = !write_msgs_.empty();
-    write_msgs_.push_back(boost::shared_ptr<rescore_message>(msg));
+    write_msgs_.push_back(boost::shared_ptr<RescoreMessage>(msg));
     KALDI_LOG << current_time() << ": sending rescored lattice back (write_in_progress = " << write_in_progress << ")";
     if (!write_in_progress)
     {
@@ -70,7 +70,7 @@ public:
       boost::asio::async_write(socket_,
           boost::asio::buffer(write_msgs_.front()->data(),
             write_msgs_.front()->length()),
-          boost::bind(&rescore_session::handle_write, shared_from_this(),
+          boost::bind(&RescoreSession::handle_write, shared_from_this(),
             boost::asio::placeholders::error));
     }
   }
@@ -82,7 +82,7 @@ public:
       if (! read_msg_.decode_header()) {
         KALDI_WARN << "Failed to read lattice from client. Lattice too big?";
         // reply with error msg
-        rescore_message *out = new rescore_message();
+        RescoreMessage *out = new RescoreMessage();
         out->body_length(3);
         out->body()[0] = 'E';
         out->body()[1] = 'E';
@@ -95,7 +95,7 @@ public:
         KALDI_LOG << current_time() << ": starting to receive lattice of size " << read_msg_.body_length();
         boost::asio::async_read(socket_,
           boost::asio::buffer(read_msg_.body(), read_msg_.body_length()),
-          boost::bind(&rescore_session::handle_read_body, shared_from_this(),
+          boost::bind(&RescoreSession::handle_read_body, shared_from_this(),
             boost::asio::placeholders::error));
       }
     }
@@ -115,20 +115,17 @@ public:
 
   void handle_write(const boost::system::error_code& error)
   {
-
     // remove message from queue
     write_msgs_.pop_front();
 
-    if (!error)
-    {
+    if (!error) {
       // continue sending
-      if (!write_msgs_.empty())
-      {
+      if (!write_msgs_.empty()) {
         KALDI_LOG << current_time() << ": will send buffer of size " << write_msgs_.front()->length();
         boost::asio::async_write(socket_,
             boost::asio::buffer(write_msgs_.front()->data(),
               write_msgs_.front()->length()),
-            boost::bind(&rescore_session::handle_write, shared_from_this(),
+            boost::bind(&RescoreSession::handle_write, shared_from_this(),
               boost::asio::placeholders::error));
       }
     } else {
@@ -140,38 +137,39 @@ private:
   // The socket used to communicate with the client.
   stream_protocol::socket socket_;
 
-  rescore_message read_msg_;
-  rescore_message_queue write_msgs_;
+  RescoreMessage read_msg_;
+  RescoreMessageQueue write_msgs_;
 
-  rescore_dispatch* dispatcher_;
+  RescoreDispatch* dispatcher_;
 };
 
-typedef boost::shared_ptr<rescore_session> session_ptr;
+typedef boost::shared_ptr<RescoreSession> SessionPtr;
 
 
-class server
+class Server
 {
 public:
-  server(boost::asio::io_service& io_service, const std::string& file, rescore_dispatch* dispatcher)
+  Server(boost::asio::io_service& io_service, 
+    const std::string& file, 
+    RescoreDispatch* dispatcher)
     : io_service_(io_service),
       acceptor_(io_service, stream_protocol::endpoint(file)),
       dispatcher_(dispatcher)
-  { 
-    session_ptr new_session(new rescore_session(io_service_, dispatcher_));
+  {
+    SessionPtr new_session(new RescoreSession(io_service_, dispatcher_));
     acceptor_.async_accept(new_session->socket(),
-        boost::bind(&server::handle_accept, this, new_session,
+        boost::bind(&Server::handle_accept, this, new_session,
           boost::asio::placeholders::error));
   }
 
-  void handle_accept(session_ptr new_session,
+  void handle_accept(SessionPtr new_session,
       const boost::system::error_code& error)
   {
-    if (!error)
-    {
+    if (!error) {
       new_session->start();
-      new_session.reset(new rescore_session(io_service_, dispatcher_));
+      new_session.reset(new RescoreSession(io_service_, dispatcher_));
       acceptor_.async_accept(new_session->socket(),
-          boost::bind(&server::handle_accept, this, new_session,
+          boost::bind(&Server::handle_accept, this, new_session,
             boost::asio::placeholders::error));
     }
   }
@@ -179,7 +177,7 @@ public:
 private:
   boost::asio::io_service& io_service_;
   stream_protocol::acceptor acceptor_;
-  rescore_dispatch* dispatcher_;
+  RescoreDispatch* dispatcher_;
 };
 
 
@@ -189,30 +187,71 @@ int main(int argc, char* argv[])
   {
     const char *usage =
         "Multithreaded server for remote lattice rescoring.\n"
-        "Usage: rescorer_unix [options] <socket> <rescore-lm-rspecifier> <lm-fst-rspecifier>\n";
+        "Usage: rescorer_unix [options] <socket> <lm-fst-rspecifier>\n";
     ParseOptions po(usage);
     TaskSequencerConfig sequencer_config;
     sequencer_config.Register(&po);
+
+    std::string rescore_const_arpa_lm;
+    std::string rescore_rnnlm_dir;
+    // "carpa", "rnnlm" or "both"
+    std::string rescore_mode = "carpa";
+    kaldi::int32 max_ngram_order = 4;
+    po.Register("mode", &rescore_mode, "defines how the rescorer operates. \"carpa\" uses "
+                                      "just a const-arpa model to perform rescoring. "
+                                      "\"rnnlm\" uses just the rnnlm model to perform rescoring, while"
+                                      "\"both\" performs rescoring with carpa, and then with rnnlm afterwards.");
+    po.Register("const-arpa", &rescore_const_arpa_lm, "ConstArpa LM rspecifier, required if the mode is "
+                                                   "\"carpa\" or \"both\"");
+    po.Register("rnnlm-dir", &rescore_rnnlm_dir, "path to directory with required kaldi-RNNLM model, "
+                                                 "required if the mode is \"rnnlm\" or \"both\". "
+                                                 "Directory should contain \"word_embedding.final.mat\"(or "
+                                                 "\"feat_embedding.final.mat\"), \"final.raw\" "
+                                                 "and \"special_symbol_opts.txt\".");
+    po.Register("max-ngram-order", &max_ngram_order,
+        "If positive, allow RNNLM histories longer than this to be identified "
+        "with each other for rescoring purposes (an approximation that "
+        "saves time and reduces output lattice size).");
+
+
     po.Read(argc, argv);
 
-    if (po.NumArgs() < 3 || po.NumArgs() > 3) {
+    if (po.NumArgs() != 2) {
+      po.PrintUsage();
+      return 1;
+    }
+    // validate named args...
+    bool do_carpa_rescore = rescore_mode == "carpa" || rescore_mode == "both";
+    bool do_rnnlm_rescore = rescore_mode == "rnnlm" || rescore_mode == "both";
+    if (do_carpa_rescore && rescore_const_arpa_lm.empty()) {
+      po.PrintUsage();
+      return 1;
+    }
+    if (do_rnnlm_rescore && rescore_rnnlm_dir.empty()) {
         po.PrintUsage();
         return 1;
     }
 
     std::string socket = po.GetArg(1),
-        rescore_lm = po.GetArg(2),
-        lm_fst = po.GetArg(3);
+      lm_fst = po.GetArg(2);
 
     // unbind address
     unlink(socket.c_str());
 
     // load dispatcher
-    rescore_dispatch* dispatch = new rescore_dispatch(sequencer_config, rescore_lm, lm_fst);
+    // dispatcher trusts that arguments have been validated above...
+    RescoreDispatch* dispatch = new RescoreDispatch(sequencer_config,
+            rescore_mode,
+            lm_fst,
+            rescore_const_arpa_lm,
+            rescore_rnnlm_dir,
+            max_ngram_order,
+            do_carpa_rescore,
+            do_rnnlm_rescore);
 
     boost::asio::io_service io_service;
 
-    server s(io_service, socket.c_str(), dispatch);
+    Server s(io_service, socket, dispatch);
 
     io_service.run();
   }
