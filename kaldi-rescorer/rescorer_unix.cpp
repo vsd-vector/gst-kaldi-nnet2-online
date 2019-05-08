@@ -14,6 +14,7 @@
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/asio.hpp>
+#include <boost/signals2.hpp>
 
 #include "rescore_common.hpp"
 #include "rescore_message.hpp"
@@ -154,12 +155,29 @@ public:
     RescoreDispatch* dispatcher)
     : io_service_(io_service),
       acceptor_(io_service, stream_protocol::endpoint(file)),
-      dispatcher_(dispatcher)
+      dispatcher_(dispatcher),
+      signals_(io_service, SIGINT, SIGTERM)
   {
     SessionPtr new_session(new RescoreSession(io_service_, dispatcher_));
     acceptor_.async_accept(new_session->socket(),
         boost::bind(&Server::handle_accept, this, new_session,
           boost::asio::placeholders::error));
+
+    // handle signals
+    signals_.async_wait(boost::bind(&Server::handle_signals, this, boost::asio::placeholders::error, boost::asio::placeholders::signal_number));
+  }
+
+
+  void handle_signals(const boost::system::error_code& error,
+                      int signal_number)
+  {
+      if (!error) {
+         // A signal occurred.
+        KALDI_LOG << current_time() << ": signal " << signal_number << " received";
+	exit(0);
+      }
+
+      KALDI_WARN << current_time() << " error in signal handler " << error.message();
   }
 
   void handle_accept(SessionPtr new_session,
@@ -178,6 +196,7 @@ private:
   boost::asio::io_service& io_service_;
   stream_protocol::acceptor acceptor_;
   RescoreDispatch* dispatcher_;
+  boost::asio::signal_set signals_;
 };
 
 
@@ -249,7 +268,7 @@ int main(int argc, char* argv[])
             do_carpa_rescore,
             do_rnnlm_rescore);
 
-    boost::asio::io_service io_service;
+    boost::asio::io_service io_service;    
 
     Server s(io_service, socket, dispatch);
 
