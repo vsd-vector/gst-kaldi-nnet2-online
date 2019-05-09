@@ -26,7 +26,7 @@ using boost::asio::local::stream_protocol;
 
 //----------------------------------------------------------------------
 
-typedef std::deque<boost::shared_ptr<RescoreMessage> > RescoreMessageQueue;
+//typedef std::deque<boost::shared_ptr<RescoreMessage> > RescoreMessageQueue;
 
 //----------------------------------------------------------------------
 

@@ -30,4 +30,6 @@ public:
 
 typedef boost::shared_ptr<RescoreJob> RescoreJobPtr;
 
+typedef std::deque<boost::shared_ptr<RescoreMessage> > RescoreMessageQueue;
+
 #endif // RESCORE_COMMON_HPP
