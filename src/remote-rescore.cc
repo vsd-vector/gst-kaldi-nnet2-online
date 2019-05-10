@@ -22,25 +22,32 @@
 #include <sstream>
 #include <istream>
 #include <sys/socket.h>
+//#include <utility> // fixme CLion adds this automatically for some reason, hmmm
 
 namespace kaldi {
 
     RemoteRescore::RemoteRescore(std::string address, void (*error_log_func)(std::string msg)) {
         this->error_log_func = error_log_func;
-        process_address(address);
+        if (address[0] == 'u') {
+            this->rescore_socket = new UnixSocket(address, error_log_func);
+        } else if (address[0] == 't') {
+            this->rescore_socket = new TcpSocket(address, error_log_func);
+        } else {
+            error_log_func("Unable to create rescore socket. Protocol not implemented");
+            // TODO error state... in constructor?
+        }
     }
 
-    RemoteRescore::RemoteRescore(std::string address) {
-        error_log_func = &empty_log_func;
-        process_address(address);
-    };
+    RemoteRescore::RemoteRescore(std::string address) :
+            RemoteRescore::RemoteRescore(std::move(address), &empty_log_func) {
+    }
 
     bool RemoteRescore::send_lattice(CompactLattice &lat) {
         std::ostringstream str;
         WriteCompactLattice(str, true, lat);
         ssize_t size_of_lattice = str.tellp();
         char header[4];
-        *((uint32_t*)header) = htole32(size_of_lattice);
+        *((uint32_t *) header) = htole32(size_of_lattice);
         int size_of_header = sizeof(header);
 
         if (size_of_lattice > max_lattice_size) {
@@ -48,67 +55,67 @@ namespace kaldi {
             return false;
         }
 
-        if (send_bytes(header, size_of_header) == false) {
+        if (!rescore_socket->send_bytes(header, size_of_header)) {
             error_log_func("Failed to write header to rescore socket");
             return false;
         }
 
-        if (send_bytes(str.str().c_str(), size_of_lattice) == false) {
+        if (!rescore_socket->send_bytes(str.str().c_str(), size_of_lattice)) {
             error_log_func("Failed to write lattice to rescore socket");
             return false;
         }
         return true;
     }
 
-    CompactLattice* RemoteRescore::rcv_lattice() {
+    CompactLattice *RemoteRescore::rcv_lattice() {
         ssize_t size_of_lattice = 0;
         char header[4];
 
         // read header
-        if (rcv_bytes(header, 4) == false) {
+        if (!rescore_socket->receive_bytes(header, 4)) {
             error_log_func("Failed to read header from rescore socket");
-            return NULL;
+            return nullptr;
         }
 
         // get body size from header
-        size_of_lattice = le32toh(*((uint32_t*)header));
+        size_of_lattice = le32toh(*((uint32_t *) header));
 
         // allocate buffer for body
-        char* buffer = new char[size_of_lattice];
+        char *buffer = new char[size_of_lattice];
 
-        if (rcv_bytes(buffer, size_of_lattice) == false) {
+        if (!rescore_socket->receive_bytes(buffer, size_of_lattice)) {
             error_log_func("Failed to read lattice from rescore socket");
-            return NULL;
+            return nullptr;
         }
 
-       // create a stream to read CompactLattice from
-       membuf sbuf(buffer, buffer + size_of_lattice);
-       std::istream in(&sbuf);
-       CompactLattice* tmp_lat = NULL;
-       if (ReadCompactLattice(in, true, &tmp_lat)) {
-           return tmp_lat;
-       } else {
-           error_log_func("Failed to parse lattice");
-           return NULL;
-       }
+        // create a stream to read CompactLattice from
+        membuf sbuf(buffer, buffer + size_of_lattice);
+        std::istream in(&sbuf);
+        CompactLattice *tmp_lat = nullptr;
+        if (ReadCompactLattice(in, true, &tmp_lat)) {
+            return tmp_lat;
+        } else {
+            error_log_func("Failed to parse lattice");
+            return nullptr;
+        }
     }
 
     bool RemoteRescore::rescore(CompactLattice &lat, CompactLattice &rescored_lat) {
         // connect to rescorer
-        if (! connect_socket()) {
+        if (!rescore_socket->connect_socket()) {
             return false;
         }
 
         // send lattice to remote rescorer
-        if (! send_lattice(lat) ) {
-            close_socket();
+        if (!send_lattice(lat)) {
+            rescore_socket->close_socket();
             return false;
         }
 
         // read rescored lattice
-        CompactLattice* tmp = rcv_lattice();
-        if (tmp == NULL ) {
-            close_socket();
+        CompactLattice *tmp = rcv_lattice();
+        if (tmp == nullptr) {
+            rescore_socket->close_socket();
             return false;
         }
 
@@ -116,69 +123,91 @@ namespace kaldi {
         delete tmp;
 
         // close socket
-        close_socket();
+        rescore_socket->close_socket();
 
         return true;
     }
 
     RemoteRescore::~RemoteRescore() {
-        // destructor
+        delete rescore_socket;
     }
 
-
-    bool RemoteRescore::process_address (std::string address) {
-        const char* c_addr = address.c_str() + 2; // skip "u:" or "t:"
-
-        if (address[0] == 'u') {
-            memset(&addr, 0, sizeof(addr));            
-            addr.sun_family = AF_UNIX;
-            strncpy(addr.sun_path, c_addr, sizeof(addr.sun_path)-1);
-        } else {
-            error_log_func("Unable to create rescore socket. Protocol not implemented");
-        }
-
-        return true;
+    // unix socket
+    RemoteRescore::UnixSocket::UnixSocket(const std::string &address,
+                                          void (*error_log_func)(std::string msg)) {
+        this->error_log_func = error_log_func;
+        this->fd = -1;
+        // TODO is this really the best way to init addr?
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        const char *c_addr = address.c_str() + 2; // skip "u:"
+        strncpy(addr.sun_path, c_addr, sizeof(addr.sun_path) - 1);
     }
 
-    bool RemoteRescore::connect_socket () {
-        if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+    bool RemoteRescore::UnixSocket::connect_socket() {
+        if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
             error_log_func("Unable to create rescore socket");
             return false;
         }
-        if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
             error_log_func("Failed to connect to rescore socket");
             return false;
         }
         return true;
     }
 
-    void RemoteRescore::close_socket () {
+    void RemoteRescore::UnixSocket::close_socket() {
         close(fd);
     }
 
-    bool RemoteRescore::rcv_bytes (char* buffer, ssize_t bytes) {
-        ssize_t bytes_read = 0;
-        ssize_t bytes_left = bytes;      
-    
-        // read bytes from socket
-        do {
-            bytes_read = read(fd, buffer+(bytes-bytes_left), bytes_left);
-            bytes_left -= bytes_read;        
-        }
-        while (bytes_read >= 0 && bytes_left > 0);
-
-        if (bytes_read == -1) {
-            return false;
-        }
-
-        return true;
+    bool RemoteRescore::UnixSocket::send_bytes(const char *buffer, ssize_t bytes) {
+        return write(fd, buffer, bytes) == bytes;
     }
 
-    bool RemoteRescore::send_bytes (const char* buffer, ssize_t bytes) {
-        if (write(fd, buffer, bytes) != bytes) {
-            return false;
-        }
-        return true;
+    bool RemoteRescore::UnixSocket::receive_bytes(char *buffer, ssize_t bytes) {
+        ssize_t bytes_read = 0;
+        ssize_t bytes_left = bytes;
+
+        // read bytes from socket
+        do {
+            bytes_read = read(fd, buffer + (bytes - bytes_left), bytes_left);
+            bytes_left -= bytes_read;
+        } while (bytes_read >= 0 && bytes_left > 0);
+
+        return bytes_read != -1;
+    }
+
+    RemoteRescore::UnixSocket::~UnixSocket() {
+        // destructor
+    }
+
+    // tcp socket
+    RemoteRescore::TcpSocket::TcpSocket(const std::string &address,
+                                        void (*error_log_func)(std::string msg)) {
+        // TODO tcp constructor
+    }
+
+    bool RemoteRescore::TcpSocket::connect_socket() {
+        // TODO
+        return false;
+    }
+
+    void RemoteRescore::TcpSocket::close_socket() {
+        // TODO
+    }
+
+    bool RemoteRescore::TcpSocket::send_bytes(const char *buffer, ssize_t bytes) {
+        // TODO
+        return false;
+    }
+
+    bool RemoteRescore::TcpSocket::receive_bytes(char *buffer, ssize_t bytes) {
+        // TODO
+        return false;
+    }
+
+    RemoteRescore::TcpSocket::~TcpSocket() {
+        // destructor
     }
 
 }  // namespace kaldi

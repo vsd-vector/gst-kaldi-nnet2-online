@@ -25,50 +25,88 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include "lat/lattice-functions.h"
+#include <boost/asio.hpp>
 
 namespace kaldi {
 
 
 // Lattice rescoring in separate "remote" process
-class RemoteRescore {
+    class RemoteRescore {
     public:
-    enum { max_lattice_size = 1024*1024*100 }; // size limit for sanity (100MB)
+        enum {
+            max_lattice_size = 1024 * 1024 * 100
+        }; // size limit for sanity (100MB)
 
-    RemoteRescore(std::string address);
-    RemoteRescore(std::string address, void (*error_log_func)(std::string msg));
+        RemoteRescore(std::string address);
 
-    void (*error_log_func)(std::string msg);
+        RemoteRescore(std::string address, void (*error_log_func)(std::string msg));
 
-    bool rescore(CompactLattice &lat, CompactLattice &rescored_lat);
+        void (*error_log_func)(std::string msg);
 
-    virtual ~RemoteRescore();
+        bool rescore(CompactLattice &lat, CompactLattice &rescored_lat);
 
-    protected:
-
-    int fd;
-    struct sockaddr_un addr;
-
-    bool process_address (std::string address);
-    bool connect_socket ();
-    void close_socket ();
-    bool rcv_bytes (char* buffer, ssize_t bytes);
-    bool send_bytes (const char* buffer, ssize_t bytes);
-
-    virtual CompactLattice* rcv_lattice();
-    virtual bool send_lattice(CompactLattice &lat);
+        ~RemoteRescore();
 
     private:
 
-    struct membuf : std::streambuf
-    {
-        membuf(char* begin, char* end) {
-            this->setg(begin, begin, end);
-        }
+        class RescoreSocket {
+        public:
+//            RescoreSocket(std::string address);
+
+            virtual bool connect_socket();
+            virtual void close_socket();
+            virtual bool send_bytes(const char* buffer, ssize_t bytes);
+            virtual bool receive_bytes(char* buffer, ssize_t bytes);
+
+            virtual ~RescoreSocket();
+        };
+
+        RescoreSocket *rescore_socket;
+
+        CompactLattice *rcv_lattice();
+
+        bool send_lattice(CompactLattice &lat);
+
+        struct membuf : std::streambuf {
+            membuf(char *begin, char *end) {
+                this->setg(begin, begin, end);
+            }
+        };
+
+        static void empty_log_func(std::string msg) {};
+
+        class UnixSocket : public RescoreSocket {
+        public:
+            UnixSocket(const std::string& address, void (*error_log_func)(std::string msg));
+
+            bool connect_socket() override;
+            void close_socket() override;
+            bool send_bytes(const char* buffer, ssize_t bytes) override;
+            bool receive_bytes(char* buffer, ssize_t bytes) override;
+            ~UnixSocket() override;
+        private:
+            int fd;
+            struct sockaddr_un addr;
+            void (*error_log_func)(std::string msg);
+        };
+
+        class TcpSocket : public RescoreSocket {
+        public:
+            TcpSocket(const std::string& address, void (*error_log_func)(std::string msg));
+
+            bool connect_socket() override;
+            void close_socket() override;
+            bool send_bytes(const char* buffer, ssize_t bytes) override;
+            bool receive_bytes(char* buffer, ssize_t bytes) override;
+            ~TcpSocket() override;
+        private:
+            boost::asio::ip::tcp::endpoint endpoint;
+            // TODO the rest of jazz
+        };
+
     };
 
-    static void empty_log_func(std::string msg) {};
 
-};
 
 }  // namespace kaldi
 
