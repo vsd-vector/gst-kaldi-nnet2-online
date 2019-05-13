@@ -182,7 +182,7 @@ int main(int argc, char *argv[]) {
         // TODO update usage
         const char *usage =
                 "Multithreaded server for remote lattice rescoring.\n"
-                "Usage: rescorer_unix [options] <socket> <lm-fst-rspecifier>\n";
+                "Usage: rescorer_tcp [options] <port> <lm-fst-rspecifier>\n";
         ParseOptions po(usage);
         TaskSequencerConfig sequencer_config;
         sequencer_config.Register(&po);
@@ -241,12 +241,9 @@ int main(int argc, char *argv[]) {
                                                         do_carpa_rescore,
                                                         do_rnnlm_rescore);
 
-
         boost::asio::io_service io_service;
         tcp::endpoint endpoint(tcp::v4(), std::atoi(port.c_str()));
-//        tcp::endpoint endpoint(tcp::v4(), std::strtol(port));
         Server s(io_service, endpoint, dispatch);
-//    rescore_server_ptr server(new Server(io_service, endpoint, dispatch));
 
         io_service.run();
 
