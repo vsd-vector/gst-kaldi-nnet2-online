@@ -279,6 +279,8 @@ int main(int argc, char *argv[]) {
             io_service.run();
         } else {
             KALDI_LOG << current_time() << ": Starting rescorer on unix socket at: " << address;
+            // unbind file at address
+            unlink(address.c_str());
             stream_protocol::endpoint endpoint(address);
             Server<stream_protocol> s(io_service, endpoint, dispatch);
             io_service.run();
