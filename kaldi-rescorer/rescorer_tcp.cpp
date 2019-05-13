@@ -7,24 +7,19 @@
 //
 
 #include <algorithm>
-#include <cstdlib>
 #include <deque>
 #include <iostream>
-#include <list>
-#include <set>
 #include <boost/bind.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/asio.hpp>
+#include <boost/signals2.hpp>
+
 #include "rescore_message.hpp"
 #include "rescore_common.hpp"
 #include "rescore_dispatch.hpp"
 
 using boost::asio::ip::tcp;
-
-//----------------------------------------------------------------------
-
-//typedef std::deque<RescoreMessage> RescoreMessageQueue;
 
 //----------------------------------------------------------------------
 
@@ -84,7 +79,6 @@ public:
                 out->encode_header();
                 deliver(out);
                 // disconnect
-                // TODO hmm for tcp?
                 close();
             } else {
                 KALDI_LOG << current_time() << ": starting to receive lattice of size " << read_msg_.body_length();
@@ -103,11 +97,6 @@ public:
             dispatcher_->rescore(read_msg_, shared_from_this());
             // wait for next header
             start();
-            // TODO: process read_msg_ and rescore
-//      boost::asio::async_read(socket_,
-//          boost::asio::buffer(read_msg_.data(), rescore_message::header_length),
-//          boost::bind(&RescoreSession::handle_read_header, shared_from_this(),
-//            boost::asio::placeholders::error));
         }
     }
 
@@ -123,14 +112,16 @@ public:
                                                              write_msgs_.front()->length()),
                                          boost::bind(&RescoreSession::handle_write, shared_from_this(),
                                                      boost::asio::placeholders::error));
-            } else {
-                KALDI_WARN << current_time() << ": failed to send lattice to client. Error code: " << error.message();
             }
+        } else {
+            KALDI_WARN << current_time() << ": failed to send lattice to client. Error code: " << error.message();
         }
     }
 
 private:
+    // The socket used to communicate with the client.
     tcp::socket socket_;
+
     RescoreMessage read_msg_;
     RescoreMessageQueue write_msgs_;
 
@@ -148,11 +139,29 @@ public:
            RescoreDispatch *dispatcher)
             : io_service_(io_service),
               acceptor_(io_service, endpoint),
-              dispatcher_(dispatcher) {
+              dispatcher_(dispatcher),
+              signals_(io_service, SIGINT, SIGTERM) {
         SessionPtr new_session(new RescoreSession(io_service_, dispatcher_));
         acceptor_.async_accept(new_session->socket(),
                                boost::bind(&Server::handle_accept, this, new_session,
                                            boost::asio::placeholders::error));
+
+        // handle signals
+        signals_.async_wait(boost::bind(&Server::handle_signals,
+                                        this,
+                                        boost::asio::placeholders::error,
+                                        boost::asio::placeholders::signal_number));
+    }
+
+    void handle_signals(const boost::system::error_code &error,
+                        int signal_number) {
+        if (!error) {
+            // A signal occurred.
+            KALDI_LOG << current_time() << ": signal " << signal_number << " received";
+            exit(0);
+        }
+
+        KALDI_WARN << current_time() << " error in signal handler " << error.message();
     }
 
     void handle_accept(SessionPtr new_session,
@@ -171,15 +180,13 @@ private:
     boost::asio::io_service &io_service_;
     tcp::acceptor acceptor_;
     RescoreDispatch *dispatcher_;
+    boost::asio::signal_set signals_;
 };
-
-//typedef boost::shared_ptr<Server> rescore_server_ptr;
 
 //----------------------------------------------------------------------
 
 int main(int argc, char *argv[]) {
     try {
-        // TODO update usage
         const char *usage =
                 "Multithreaded server for remote lattice rescoring.\n"
                 "Usage: rescorer_tcp [options] <port> <lm-fst-rspecifier>\n";
