@@ -18,17 +18,22 @@ CXXFLAGS += -I$(KALDI_ROOT)/src
 EXTRA_CXXFLAGS += $(shell pkg-config --cflags gstreamer-1.0)
 EXTRA_CXXFLAGS += $(shell pkg-config --cflags glib-2.0)
 EXTRA_CXXFLAGS += $(shell pkg-config --cflags jansson)
+EXTRA_CXXFLAGS +=-I /usr/lib/boost/include
 
 EXTRA_LDLIBS += -lgstbase-1.0 -lgstcontroller-1.0 -lgobject-2.0 -lgmodule-2.0 -lgthread-2.0
 EXTRA_LDLIBS += $(shell pkg-config --libs gstreamer-1.0)
 EXTRA_LDLIBS += $(shell pkg-config --libs glib-2.0)
 EXTRA_LDLIBS += $(shell pkg-config --libs jansson)
 
+
 #Kaldi shared libraries required by the GStreamer plugin
 EXTRA_LDLIBS += -L$(KALDI_ROOT)/src/lib -lkaldi-online2 -lkaldi-lat -lkaldi-decoder -lkaldi-feat -lkaldi-transform \
  -lkaldi-gmm -lkaldi-hmm \
  -lkaldi-tree -lkaldi-matrix  -lkaldi-util -lkaldi-base -lkaldi-lm  \
  -lkaldi-nnet2 -lkaldi-nnet3 -lkaldi-cudamatrix -lkaldi-ivector -lkaldi-fstext -lkaldi-chain
+
+# boost for tcp comms etc
+EXTRA_LDLIBS += -lboost_system -lboost_date_time
 
 OBJFILES = gstkaldinnet2onlinedecoder.o simple-options-gst.o gst-audio-source.o kaldimarshal.o remote-rescore.o
 

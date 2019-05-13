@@ -26,6 +26,7 @@
 #include <sys/un.h>
 #include "lat/lattice-functions.h"
 #include <boost/asio.hpp>
+#include <boost/shared_ptr.hpp>
 
 namespace kaldi {
 
@@ -53,10 +54,10 @@ namespace kaldi {
         public:
 //            RescoreSocket(std::string address);
 
-            virtual bool connect_socket();
-            virtual void close_socket();
-            virtual bool send_bytes(const char* buffer, ssize_t bytes);
-            virtual bool receive_bytes(char* buffer, ssize_t bytes);
+            virtual bool connect_socket() = 0;
+            virtual void close_socket() = 0;
+            virtual bool send_bytes(const char* buffer, ssize_t bytes) = 0;
+            virtual bool receive_bytes(char* buffer, ssize_t bytes) = 0;
 
             virtual ~RescoreSocket();
         };
@@ -85,9 +86,9 @@ namespace kaldi {
             bool receive_bytes(char* buffer, ssize_t bytes) override;
             ~UnixSocket() override;
         private:
+            void (*error_log_func)(std::string msg);
             int fd;
             struct sockaddr_un addr;
-            void (*error_log_func)(std::string msg);
         };
 
         class TcpSocket : public RescoreSocket {
@@ -100,8 +101,11 @@ namespace kaldi {
             bool receive_bytes(char* buffer, ssize_t bytes) override;
             ~TcpSocket() override;
         private:
+            void (*error_log_func)(std::string msg);
             boost::asio::ip::tcp::endpoint endpoint;
-            // TODO the rest of jazz
+            // context is the new name of service
+            boost::shared_ptr<boost::asio::io_context> ctx;
+            boost::shared_ptr<boost::asio::ip::tcp::socket> socket;
         };
 
     };

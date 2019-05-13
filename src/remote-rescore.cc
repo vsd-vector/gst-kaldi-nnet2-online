@@ -22,7 +22,7 @@
 #include <sstream>
 #include <istream>
 #include <sys/socket.h>
-//#include <utility> // fixme CLion adds this automatically for some reason, hmmm
+#include <boost/make_shared.hpp>
 
 namespace kaldi {
 
@@ -132,6 +132,11 @@ namespace kaldi {
         delete rescore_socket;
     }
 
+    // base virtual destructor is required for some weird linking reason...
+    RemoteRescore::RescoreSocket::~RescoreSocket() {
+        // noop
+    }
+
     // unix socket
     RemoteRescore::UnixSocket::UnixSocket(const std::string &address,
                                           void (*error_log_func)(std::string msg)) {
@@ -184,26 +189,71 @@ namespace kaldi {
     // tcp socket
     RemoteRescore::TcpSocket::TcpSocket(const std::string &address,
                                         void (*error_log_func)(std::string msg)) {
-        // TODO tcp constructor
+        this->error_log_func = error_log_func;
+        this->error_log_func("trying to parse address and port!");
+        // parse address
+        size_t pos = address.find(':');
+        // dbg
+        std::stringstream ss;
+        ss << "first pos at: " << pos;
+        this->error_log_func(ss.str());
+
+        std::string host_and_port = address.substr(pos + 1, address.length());
+        //dbg
+        ss.str("");
+        ss << "host_and_port: " << host_and_port;
+        this->error_log_func(ss.str());
+
+        pos = host_and_port.find(':');
+        //dbg
+        ss.str("");
+        ss << "second pos at : " << pos;
+        this->error_log_func(ss.str());
+
+        std::string host = host_and_port.substr(0, pos);
+        std::string port = host_and_port.substr(pos + 1, host_and_port.length());
+        //dbg
+        ss.str("");
+        ss << "host: " << host << ", port: " << port;
+        this->error_log_func(ss.str());
+
+        // TODO this only creates ip addresses, right? what about names?
+        boost::asio::ip::address ip_addr = boost::asio::ip::address::from_string(host);
+        unsigned short port_num = std::atoi(port.c_str());
+        this->error_log_func("address and port_num parsed!");
+        // TODO not sure if move needed here...
+        endpoint = std::move(boost::asio::ip::tcp::endpoint(ip_addr, port_num));
+        this->error_log_func("endpoint created");
+
+        // set up socket and associated plumbing
+        ctx = boost::make_shared<boost::asio::io_context>();
+        socket = boost::make_shared<boost::asio::ip::tcp::socket>(*ctx);
+        this->error_log_func("io plumbing created");
     }
 
     bool RemoteRescore::TcpSocket::connect_socket() {
-        // TODO
-        return false;
+        // TODO error handling, catch exception, log, return false
+        this->error_log_func("connect_socket");
+        socket->connect(endpoint);
+        return true;
     }
 
     void RemoteRescore::TcpSocket::close_socket() {
-        // TODO
+        this->error_log_func("close_socket");
+        socket->close();
     }
 
     bool RemoteRescore::TcpSocket::send_bytes(const char *buffer, ssize_t bytes) {
-        // TODO
-        return false;
+        this->error_log_func("send_bytes");
+        // TODO handle errors...
+        return socket->write_some(boost::asio::buffer(buffer, bytes)) == bytes;
+//        return true;
     }
 
     bool RemoteRescore::TcpSocket::receive_bytes(char *buffer, ssize_t bytes) {
-        // TODO
-        return false;
+        this->error_log_func("receive_bytes");
+        // TODO error handling
+        return socket->read_some(boost::asio::buffer(buffer, bytes)) != -1;
     }
 
     RemoteRescore::TcpSocket::~TcpSocket() {
