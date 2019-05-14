@@ -211,28 +211,52 @@ namespace kaldi {
     }
 
     bool RemoteRescore::TcpSocket::connect_socket() {
-        // TODO error handling, catch exception, log, return false
-        this->error_log_func("connect_socket");
-        socket->connect(endpoint);
+        this->error_log_func("connect_socket"); // fixme remove
+        try {
+            socket->connect(endpoint);
+        } catch (boost::system::system_error &e) {
+            std::stringstream ss;
+            ss << "Failed to connect to rescore socket, error: " << e.what();
+            this->error_log_func(ss.str());
+            return false;
+        }
+
         return true;
     }
 
     void RemoteRescore::TcpSocket::close_socket() {
-        this->error_log_func("close_socket");
-        socket->close();
+        this->error_log_func("close_socket"); // fixme remove
+        try {
+            socket->close();
+        } catch (boost::system::system_error &e) {
+            std::stringstream ss;
+            ss << "Error on closing socket, can be ignored: " << e.what();
+            this->error_log_func(ss.str());
+        }
     }
 
     bool RemoteRescore::TcpSocket::send_bytes(const char *buffer, ssize_t bytes) {
-        this->error_log_func("send_bytes");
-        // TODO handle errors...
-        return socket->write_some(boost::asio::buffer(buffer, bytes)) == bytes;
-//        return true;
+        this->error_log_func("send_bytes"); // fixme remove
+        try {
+            return socket->write_some(boost::asio::buffer(buffer, bytes)) == bytes;
+        } catch (boost::system::system_error &e) {
+            std::stringstream ss;
+            ss << "Error sending bytes: " << e.what();
+            this->error_log_func(ss.str());
+        }
+        return false;
     }
 
     bool RemoteRescore::TcpSocket::receive_bytes(char *buffer, ssize_t bytes) {
-        this->error_log_func("receive_bytes");
-        // TODO error handling
-        return socket->read_some(boost::asio::buffer(buffer, bytes)) != -1;
+        this->error_log_func("receive_bytes"); // fixme remove
+        try {
+            return socket->read_some(boost::asio::buffer(buffer, bytes)) != -1;
+        } catch (boost::system::system_error &e) {
+            std::stringstream ss;
+            ss << "Error receiving bytes: " << e.what();
+            this->error_log_func(ss.str());
+        }
+        return false;
     }
 
     RemoteRescore::TcpSocket::~TcpSocket() {
