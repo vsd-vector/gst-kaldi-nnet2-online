@@ -1,5 +1,6 @@
 # skip binaries
 rescorer_unix
 rescorer_tcp
+rescorer
 test/client
 test/lat.out

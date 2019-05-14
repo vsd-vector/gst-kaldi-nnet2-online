@@ -34,33 +34,18 @@ endif
 EXTRA_LDLIBS +=  -Wl,--no-as-needed -Wl,-rpath=$(KALDILIBDIR) -lrt -pthread
 
 # target definitions
-OBJFILES = rescore_dispatch.o
+OBJFILES = rescore_dispatch.o rescorer.o
+BINFILES = rescorer
 
-OBJFILES_unix = rescorer_unix.o
-OBJFILES_tcp = rescorer_tcp.o
+$(BINFILES): $(OBJFILES)
 
-BINFILES_unix = rescorer_unix
-BINFILES_tcp = rescorer_tcp
-
-$(BINFILES_unix): $(OBJFILES) $(OBJFILES_unix)
-$(BINFILES_tcp): $(OBJFILES) $(OBJFILES_tcp)
-
-# we only want to link the actually used files,
-# otherwise linker complains about multiple mains(), hence OBJFILES_FINAL...
-unix: OBJFILES_FINAL=$(OBJFILES) $(OBJFILES_unix)
-unix: $(BINFILES_unix)
-
-tcp: OBJFILES_FINAL=$(OBJFILES) $(OBJFILES_tcp)
-tcp: $(BINFILES_tcp)
-
-all: OBJFILES_FINAL=$(OBJFILES) $(OBJFILES_unix) $(OBJFILES_tcp)
-all: unix tcp
+all: $(BINFILES)
 
 .o:
 	$(CXX) -DPIC -o $@ $(EXTRA_LDLIBS) $(LDLIBS) $(LDFLAGS) \
-	  $(OBJFILES_FINAL)
+	  $(OBJFILES)
 
 clean: 
-	-rm -f *.o *.a $(TESTFILES) $(BINFILES_unix) $(BINFILES_tcp)
+	-rm -f *.o *.a $(TESTFILES) $(BINFILES)
  
 

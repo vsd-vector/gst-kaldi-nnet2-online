@@ -1,42 +1,43 @@
 //
-// rescorer_unix.cpp
+// rescorer.cpp
 // ~~~~~~~~~~~~~~~
 //
 // Copyright (c) 2015 Askars Salimbajevs (SIA Tilde)
 //
 //
 
-#include <cstdio>
+#include <algorithm>
 #include <deque>
 #include <iostream>
-#include <boost/array.hpp>
 #include <boost/bind.hpp>
-#include <boost/enable_shared_from_this.hpp>
 #include <boost/shared_ptr.hpp>
+#include <boost/enable_shared_from_this.hpp>
 #include <boost/asio.hpp>
 #include <boost/signals2.hpp>
+#include <boost/asio/basic_stream_socket.hpp>
+#include <boost/asio/basic_socket_acceptor.hpp>
 
-#include "rescore_common.hpp"
 #include "rescore_message.hpp"
+#include "rescore_common.hpp"
 #include "rescore_dispatch.hpp"
 
-#if defined(BOOST_ASIO_HAS_LOCAL_SOCKETS)
-
+// the two protocols we support, we template over one of these
+using boost::asio::ip::tcp;
 using boost::asio::local::stream_protocol;
 
 //----------------------------------------------------------------------
-
+template<typename Protocol>
 class RescoreSession
         : public RescoreJob,
-          public boost::enable_shared_from_this<RescoreSession> {
+          public boost::enable_shared_from_this<RescoreSession<Protocol> > {
 public:
     RescoreSession(boost::asio::io_service &io_service,
                    RescoreDispatch *dispatcher)
             : socket_(io_service),
               dispatcher_(dispatcher) {
-    };
+    }
 
-    stream_protocol::socket &socket() {
+    boost::asio::basic_stream_socket<Protocol> &socket() {
         return socket_;
     }
 
@@ -46,10 +47,11 @@ public:
 
     void start() {
         boost::asio::async_read(socket_,
-                                boost::asio::buffer(read_msg_.data(), RescoreMessage::header_length),
-                                boost::bind(
-                                        &RescoreSession::handle_read_header, shared_from_this(),
-                                        boost::asio::placeholders::error));
+                                boost::asio::buffer(read_msg_.data(),
+                                                    RescoreMessage::header_length),
+                                boost::bind(&RescoreSession::handle_read_header,
+                                            this->shared_from_this(),
+                                            boost::asio::placeholders::error));
     }
 
     void deliver(RescoreMessage *msg) override {
@@ -59,11 +61,14 @@ public:
                   << ": sending rescored lattice back (write_in_progress = "
                   << write_in_progress << ")";
         if (!write_in_progress) {
-            KALDI_LOG << current_time() << ": will send buffer of size " << write_msgs_.front()->length();
+            KALDI_LOG << current_time()
+                      << ": will send buffer of size "
+                      << write_msgs_.front()->length();
             boost::asio::async_write(socket_,
                                      boost::asio::buffer(write_msgs_.front()->data(),
                                                          write_msgs_.front()->length()),
-                                     boost::bind(&RescoreSession::handle_write, shared_from_this(),
+                                     boost::bind(&RescoreSession::handle_write,
+                                                 this->shared_from_this(),
                                                  boost::asio::placeholders::error));
         }
     }
@@ -83,10 +88,14 @@ public:
                 // disconnect
                 close();
             } else {
-                KALDI_LOG << current_time() << ": starting to receive lattice of size " << read_msg_.body_length();
+                KALDI_LOG << current_time()
+                          << ": starting to receive lattice of size "
+                          << read_msg_.body_length();
                 boost::asio::async_read(socket_,
-                                        boost::asio::buffer(read_msg_.body(), read_msg_.body_length()),
-                                        boost::bind(&RescoreSession::handle_read_body, shared_from_this(),
+                                        boost::asio::buffer(read_msg_.body(),
+                                                            read_msg_.body_length()),
+                                        boost::bind(&RescoreSession::handle_read_body,
+                                                    this->shared_from_this(),
                                                     boost::asio::placeholders::error));
             }
         }
@@ -94,9 +103,12 @@ public:
 
     void handle_read_body(const boost::system::error_code &error) {
         if (!error) {
-            KALDI_LOG << current_time() << ": lattice of size " << read_msg_.body_length() << " received. Rescoring...";
+            KALDI_LOG << current_time()
+                      << ": lattice of size "
+                      << read_msg_.body_length()
+                      << " received. Rescoring...";
             // process read_msg_ and rescore
-            dispatcher_->rescore(read_msg_, shared_from_this());
+            dispatcher_->rescore(read_msg_, this->shared_from_this());
             // wait for next header
             start();
         }
@@ -108,21 +120,26 @@ public:
         if (!error) {
             // continue sending
             if (!write_msgs_.empty()) {
-                KALDI_LOG << current_time() << ": will send buffer of size " << write_msgs_.front()->length();
+                KALDI_LOG << current_time()
+                          << ": will send buffer of size "
+                          << write_msgs_.front()->length();
                 boost::asio::async_write(socket_,
                                          boost::asio::buffer(write_msgs_.front()->data(),
                                                              write_msgs_.front()->length()),
-                                         boost::bind(&RescoreSession::handle_write, shared_from_this(),
+                                         boost::bind(&RescoreSession::handle_write,
+                                                     this->shared_from_this(),
                                                      boost::asio::placeholders::error));
             }
         } else {
-            KALDI_WARN << current_time() << ": failed to send lattice to client. Error code: " << error.message();
+            KALDI_WARN << current_time()
+                       << ": failed to send lattice to client. Error code: "
+                       << error.message();
         }
     }
 
 private:
     // The socket used to communicate with the client.
-    stream_protocol::socket socket_;
+    boost::asio::basic_stream_socket<Protocol> socket_;
 
     RescoreMessage read_msg_;
     RescoreMessageQueue write_msgs_;
@@ -130,22 +147,24 @@ private:
     RescoreDispatch *dispatcher_;
 };
 
-typedef boost::shared_ptr<RescoreSession> SessionPtr;
-
 //----------------------------------------------------------------------
 
+template<typename Protocol>
 class Server {
 public:
     Server(boost::asio::io_service &io_service,
-           const std::string &file,
+           const typename Protocol::endpoint &endpoint,
            RescoreDispatch *dispatcher)
             : io_service_(io_service),
-              acceptor_(io_service, stream_protocol::endpoint(file)),
+              acceptor_(io_service, endpoint),
               dispatcher_(dispatcher),
               signals_(io_service, SIGINT, SIGTERM) {
-        SessionPtr new_session(new RescoreSession(io_service_, dispatcher_));
+        boost::shared_ptr<RescoreSession<Protocol> > new_session(
+                new RescoreSession<Protocol>(io_service_, dispatcher_));
         acceptor_.async_accept(new_session->socket(),
-                               boost::bind(&Server::handle_accept, this, new_session,
+                               boost::bind(&Server::handle_accept,
+                                           this,
+                                           new_session,
                                            boost::asio::placeholders::error));
 
         // handle signals
@@ -155,7 +174,6 @@ public:
                                         boost::asio::placeholders::signal_number));
     }
 
-
     void handle_signals(const boost::system::error_code &error,
                         int signal_number) {
         if (!error) {
@@ -164,23 +182,26 @@ public:
             exit(0);
         }
 
-        KALDI_WARN << current_time() << " error in signal handler " << error.message();
+        KALDI_WARN << current_time() << " error in signal handler: " << error.message();
     }
 
-    void handle_accept(SessionPtr new_session,
+    void handle_accept(boost::shared_ptr<RescoreSession<Protocol> > new_session,
                        const boost::system::error_code &error) {
         if (!error) {
             new_session->start();
-            new_session.reset(new RescoreSession(io_service_, dispatcher_));
+            new_session.reset(new RescoreSession<Protocol>(io_service_, dispatcher_));
             acceptor_.async_accept(new_session->socket(),
-                                   boost::bind(&Server::handle_accept, this, new_session,
+                                   boost::bind(&Server::handle_accept,
+                                               this,
+                                               new_session,
                                                boost::asio::placeholders::error));
         }
+
     }
 
 private:
     boost::asio::io_service &io_service_;
-    stream_protocol::acceptor acceptor_;
+    boost::asio::basic_socket_acceptor<Protocol> acceptor_;
     RescoreDispatch *dispatcher_;
     boost::asio::signal_set signals_;
 };
@@ -191,7 +212,7 @@ int main(int argc, char *argv[]) {
     try {
         const char *usage =
                 "Multithreaded server for remote lattice rescoring.\n"
-                "Usage: rescorer_unix [options] <socket> <lm-fst-rspecifier>\n";
+                "Usage: rescorer [options] <address> <lm-fst-rspecifier>\n";
         ParseOptions po(usage);
         TaskSequencerConfig sequencer_config;
         sequencer_config.Register(&po);
@@ -236,14 +257,24 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        std::string socket = po.GetArg(1),
+        std::string address = po.GetArg(1),
                 lm_fst = po.GetArg(2);
 
-        // unbind address
-        unlink(socket.c_str());
+        bool do_tcp = address[0] == 't'; // unix sockets by default
+        // still, verify that address has been specified correctly
+        if ((address[0] != 'u' && address[0] != 't') || address[1] != ':') {
+            KALDI_WARN << "Unsupported address type: "
+                       << address[0];
+            po.PrintUsage();
+            return 1;
+        }
+
+        address = address.substr(2, address.length());
 
         // load dispatcher
         // dispatcher trusts that arguments have been validated above...
+        KALDI_LOG << current_time()
+                  << ": Loading requested models";
         RescoreDispatch *dispatch = new RescoreDispatch(sequencer_config,
                                                         rescore_mode,
                                                         lm_fst,
@@ -254,19 +285,30 @@ int main(int argc, char *argv[]) {
                                                         do_rnnlm_rescore);
 
         boost::asio::io_service io_service;
+        if (do_tcp) {
+            // server is allocated on stack, and for some reason, gets thrown out, when we exit
+            // from branch, so we block with io_service.run() inside branches, not afterwards
+            // which would've been prettier...
+            KALDI_LOG << current_time()
+                      << ": Starting rescorer in tcp mode on port: "
+                      << address;
+            tcp::endpoint endpoint(tcp::v4(), std::atoi(address.c_str()));
+            Server<tcp> s(io_service, endpoint, dispatch);
+            io_service.run();
+        } else {
+            KALDI_LOG << current_time()
+                      << ": Starting rescorer on unix socket at: "
+                      << address;
+            // unbind file at address
+            unlink(address.c_str());
+            stream_protocol::endpoint endpoint(address);
+            Server<stream_protocol> s(io_service, endpoint, dispatch);
+            io_service.run();
+        }
 
-        Server s(io_service, socket, dispatch);
-
-        io_service.run();
-    }
-    catch (std::exception &e) {
+    } catch (std::exception &e) {
         std::cerr << "Exception: " << e.what() << "\n";
     }
 
     return 0;
 }
-
-#else // defined(BOOST_ASIO_HAS_LOCAL_SOCKETS)
-# error Local sockets not available on this platform.
-#endif // defined(BOOST_ASIO_HAS_LOCAL_SOCKETS)
-
