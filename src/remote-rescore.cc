@@ -213,7 +213,6 @@ namespace kaldi {
     }
 
     bool RemoteRescore::TcpSocket::connect_socket() {
-        this->error_log_func("connect_socket"); // fixme remove
         try {
             socket->connect(endpoint);
         } catch (boost::system::system_error &e) {
@@ -227,7 +226,6 @@ namespace kaldi {
     }
 
     void RemoteRescore::TcpSocket::close_socket() {
-        this->error_log_func("close_socket"); // fixme remove
         try {
             socket->close();
         } catch (boost::system::system_error &e) {
@@ -238,7 +236,6 @@ namespace kaldi {
     }
 
     bool RemoteRescore::TcpSocket::send_bytes(const char *buffer, ssize_t bytes) {
-        this->error_log_func("send_bytes"); // fixme remove
         try {
             return socket->write_some(boost::asio::buffer(buffer, bytes)) == bytes;
         } catch (boost::system::system_error &e) {
@@ -250,7 +247,6 @@ namespace kaldi {
     }
 
     bool RemoteRescore::TcpSocket::receive_bytes(char *buffer, ssize_t bytes) {
-        this->error_log_func("receive_bytes"); // fixme remove
         try {
             return socket->read_some(boost::asio::buffer(buffer, bytes)) != -1;
         } catch (boost::system::system_error &e) {
