@@ -22,9 +22,9 @@ public:
             CompactLattice *lattice,
             RescoreJobPtr session,
             ConstArpaLm *rescore_lm,
-            fst::VectorFst <fst::StdArc> *std_lm_fst,
+            fst::VectorFst<fst::StdArc> *std_lm_fst,
             kaldi::nnet3::Nnet *rnnlm,
-            CuMatrix <BaseFloat> *rnnlm_embedding_matrix,
+            CuMatrix<BaseFloat> *rnnlm_embedding_matrix,
             rnnlm::RnnlmComputeStateComputationOptions rnnlm_opts,
             kaldi::int32 max_ngram_order,
             bool do_carpa_rescore,
@@ -37,7 +37,7 @@ public:
 private:
     bool rescore_lattice_carpa(CompactLattice *clat, CompactLattice *result_lat);
 
-    CompactLattice* rescore_lattice_rnnlm(CompactLattice *clat);
+    CompactLattice *rescore_lattice_rnnlm(CompactLattice *clat);
 
     void reload_lm_fst();
 
@@ -47,19 +47,19 @@ private:
     BaseFloat acoustic_scale_;
     // models and stuff
     // decode lm
-    fst::VectorFst <fst::StdArc> *std_lm_fst_;
+    fst::VectorFst<fst::StdArc> *std_lm_fst_;
     // carpa
     ConstArpaLm *rescore_lm_;
     // rnnlm
     rnnlm::RnnlmComputeStateComputationOptions rnnlm_opts;
     kaldi::nnet3::Nnet *rnnlm;
-    CuMatrix <BaseFloat> *rnnlm_embedding_matrix;
+    CuMatrix<BaseFloat> *rnnlm_embedding_matrix;
     kaldi::int32 max_ngram_order;
     // rescore types to be performed
     const bool do_carpa_rescore;
     const bool do_rnnlm_rescore;
     // intermediary
-    fst::MapFst <fst::StdArc, LatticeArc, fst::StdToLatticeMapper<BaseFloat>> *lm_fst_;
+    fst::MapFst<fst::StdArc, LatticeArc, fst::StdToLatticeMapper<BaseFloat>> *lm_fst_;
 
     bool computed_;
     CompactLattice *outlat_; // Stored output.
@@ -69,9 +69,9 @@ LatticeRescoreTask::LatticeRescoreTask(
         CompactLattice *lattice,
         RescoreJobPtr session,
         ConstArpaLm *rescore_lm,
-        fst::VectorFst <fst::StdArc> *std_lm_fst,
+        fst::VectorFst<fst::StdArc> *std_lm_fst,
         kaldi::nnet3::Nnet *rnnlm,
-        CuMatrix <BaseFloat> *rnnlm_embedding_matrix,
+        CuMatrix<BaseFloat> *rnnlm_embedding_matrix,
         rnnlm::RnnlmComputeStateComputationOptions rnnlm_opts,
         kaldi::int32 max_ngram_order,
         bool do_carpa_rescore,
@@ -109,9 +109,9 @@ void LatticeRescoreTask::reload_lm_fst() {
     size_t num_states_cache = 50000;
     fst::CacheOptions cache_opts(true, num_states_cache);
     fst::MapFstOptions mapfst_opts(cache_opts);
-    fst::StdToLatticeMapper <BaseFloat> mapper;
-    lm_fst_ = new fst::MapFst <fst::StdArc, LatticeArc,
-    fst::StdToLatticeMapper<BaseFloat>>(*std_lm_fst_, mapper, mapfst_opts);
+    fst::StdToLatticeMapper<BaseFloat> mapper;
+    lm_fst_ = new fst::MapFst<fst::StdArc, LatticeArc,
+            fst::StdToLatticeMapper<BaseFloat>>(*std_lm_fst_, mapper, mapfst_opts);
 }
 
 void LatticeRescoreTask::operator()() {
@@ -207,8 +207,8 @@ bool LatticeRescoreTask::rescore_lattice_carpa(CompactLattice *clat, CompactLatt
     // The following is an optimization for the TableCompose
     // composition: it stores certain tables that enable fast
     // lookup of arcs during composition.
-    fst::TableComposeCache <fst::Fst<LatticeArc>> *lm_compose_cache_ =
-            new fst::TableComposeCache <fst::Fst<LatticeArc>>(compose_opts);
+    fst::TableComposeCache<fst::Fst<LatticeArc>> *lm_compose_cache_ =
+            new fst::TableComposeCache<fst::Fst<LatticeArc>>(compose_opts);
 
     // Could just do, more simply: Compose(lat, lm_fst, &composed_lat);
     // and not have lm_compose_cache at all.
@@ -254,7 +254,7 @@ bool LatticeRescoreTask::rescore_lattice_carpa(CompactLattice *clat, CompactLatt
     return true;
 }
 
-CompactLattice* LatticeRescoreTask::rescore_lattice_rnnlm(CompactLattice *clat) { //, CompactLattice *result_lat) {
+CompactLattice *LatticeRescoreTask::rescore_lattice_rnnlm(CompactLattice *clat) { //, CompactLattice *result_lat) {
     // this here is roughly from lattice-lmrescore-kaldi-rnnlm-pruned.cc
 
     // hardcoded lm_scale for now
@@ -262,11 +262,11 @@ CompactLattice* LatticeRescoreTask::rescore_lattice_rnnlm(CompactLattice *clat) 
     // lm to subtract
     // if we did carpa rescoring, we use carpa as the model to subtract
     // for G.carpa
-    fst::DeterministicOnDemandFst <fst::StdArc> *carpa_lm_to_subtract_fst = nullptr;
+    fst::DeterministicOnDemandFst<fst::StdArc> *carpa_lm_to_subtract_fst = nullptr;
 
     // for G.fst
     fst::ScaleDeterministicOnDemandFst *lm_to_subtract_det_scale = nullptr;
-    fst::BackoffDeterministicOnDemandFst <fst::StdArc> *lm_to_subtract_det_backoff = nullptr;
+    fst::BackoffDeterministicOnDemandFst<fst::StdArc> *lm_to_subtract_det_backoff = nullptr;
 
     if (do_carpa_rescore) {
         carpa_lm_to_subtract_fst = new ConstArpaLmDeterministicFst(*rescore_lm_);
@@ -285,7 +285,7 @@ CompactLattice* LatticeRescoreTask::rescore_lattice_rnnlm(CompactLattice *clat) 
     rnnlm::KaldiRnnlmDeterministicFst *lm_to_add_orig =
             new rnnlm::KaldiRnnlmDeterministicFst(max_ngram_order, info);
 
-    fst::DeterministicOnDemandFst <fst::StdArc> *lm_to_add =
+    fst::DeterministicOnDemandFst<fst::StdArc> *lm_to_add =
             new fst::ScaleDeterministicOnDemandFst(lm_scale, lm_to_add_orig);
 
     // Before composing with the LM FST, we scale the lattice weights
@@ -298,7 +298,7 @@ CompactLattice* LatticeRescoreTask::rescore_lattice_rnnlm(CompactLattice *clat) 
     }
     TopSortCompactLatticeIfNeeded(clat);
 
-    fst::ComposeDeterministicOnDemandFst <fst::StdArc> combined_lms(
+    fst::ComposeDeterministicOnDemandFst<fst::StdArc> combined_lms(
             lm_to_subtract_det_scale, lm_to_add);
 
     // Composes lattice with language model.
@@ -348,7 +348,7 @@ public:
          kaldi::int32 max_ngram_order,
          const bool do_carpa_rescore,
          const bool do_rnnlm_rescore
-         )
+    )
             : sequencer(sequencer_config),
               acoustic_scale(0),
               max_ngram_order(max_ngram_order),
@@ -422,19 +422,19 @@ public:
     }
 
 private:
-    TaskSequencer <LatticeRescoreTask> sequencer;
+    TaskSequencer<LatticeRescoreTask> sequencer;
     BaseFloat acoustic_scale;
     kaldi::int32 max_ngram_order;
     bool do_carpa_rescore;
     bool do_rnnlm_rescore;
 
     // decode lm fst
-    fst::VectorFst <fst::StdArc> *std_lm_fst_ = nullptr;
+    fst::VectorFst<fst::StdArc> *std_lm_fst_ = nullptr;
     // carpa rescore lm
     ConstArpaLm *rescore_lm_ = nullptr;
     // rnnlm
     kaldi::nnet3::Nnet *rnnlm = nullptr;
-    CuMatrix <BaseFloat> *embedding_mat = nullptr;
+    CuMatrix<BaseFloat> *embedding_mat = nullptr;
     rnnlm::RnnlmComputeStateComputationOptions rnnlm_opts;
 
     void load_lm_fst(const std::string &lm_fst_file) {
@@ -443,13 +443,13 @@ private:
                     fst::script::MutableFstClass::Read(lm_fst_file, true);
             fst::script::Project(fst, fst::PROJECT_OUTPUT);
 
-            const fst::Fst <fst::StdArc> *tmp_fst = fst->GetFst<fst::StdArc>();
+            const fst::Fst<fst::StdArc> *tmp_fst = fst->GetFst<fst::StdArc>();
 
             std_lm_fst_ = new fst::VectorFst<fst::StdArc>(*tmp_fst);
 
             if (std_lm_fst_->Properties(fst::kILabelSorted, true) == 0) {
                 // Make sure LM is sorted on ilabel.
-                fst::ILabelCompare <fst::StdArc> ilabel_comp;
+                fst::ILabelCompare<fst::StdArc> ilabel_comp;
                 fst::ArcSort(std_lm_fst_, ilabel_comp);
             }
 
@@ -473,8 +473,8 @@ private:
     /// adapted from: https://stackoverflow.com/a/2912614
     std::string read_into_string(const std::string &path) {
         std::ifstream ifs(path);
-        std::string out( (std::istreambuf_iterator<char>(ifs)),
-                         (std::istreambuf_iterator<char>()));
+        std::string out((std::istreambuf_iterator<char>(ifs)),
+                        (std::istreambuf_iterator<char>()));
         return out;
     }
 
