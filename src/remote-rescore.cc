@@ -26,15 +26,17 @@
 
 namespace kaldi {
 
-    RemoteRescore::RemoteRescore(std::string address, void (*error_log_func)(std::string msg)) {
+    RemoteRescore::RemoteRescore(std::string address, void (*error_log_func)(std::string)) {
         this->error_log_func = error_log_func;
         if (address[0] == 'u') {
             this->rescore_socket = new UnixSocket(address, error_log_func);
         } else if (address[0] == 't') {
             this->rescore_socket = new TcpSocket(address, error_log_func);
         } else {
-            error_log_func("Unable to create rescore socket. Protocol not implemented");
-            // TODO error state... in constructor?
+            std::stringstream ss;
+            ss << "Unable to create rescore socket. Protocol \""
+               << address[0] << "\" not implemented!";
+            throw std::runtime_error(ss.str());
         }
     }
 
@@ -139,7 +141,7 @@ namespace kaldi {
 
     // unix socket
     RemoteRescore::UnixSocket::UnixSocket(const std::string &address,
-                                          void (*error_log_func)(std::string msg)) {
+                                          void (*error_log_func)(std::string)) {
         this->error_log_func = error_log_func;
         this->fd = -1;
         // TODO is this really the best way to init addr?
@@ -188,7 +190,7 @@ namespace kaldi {
 
     // tcp socket
     RemoteRescore::TcpSocket::TcpSocket(const std::string &address,
-                                        void (*error_log_func)(std::string msg)) {
+                                        void (*error_log_func)(std::string)) {
         this->error_log_func = error_log_func;
 
         // set up socket and associated plumbing
