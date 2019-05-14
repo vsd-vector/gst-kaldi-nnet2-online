@@ -52,8 +52,6 @@ namespace kaldi {
 
         class RescoreSocket {
         public:
-//            RescoreSocket(std::string address);
-
             virtual bool connect_socket() = 0;
             virtual void close_socket() = 0;
             virtual bool send_bytes(const char* buffer, ssize_t bytes) = 0;
