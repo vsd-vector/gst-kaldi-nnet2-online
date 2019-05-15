@@ -25,6 +25,11 @@
 using boost::asio::ip::tcp;
 using boost::asio::local::stream_protocol;
 
+// global SIGTERM ignore counters and state
+// we use atomic versions here just to be on the safe side from concurrency perspective
+std::atomic_int message_counter{0};
+std::atomic_bool termination_scheduled{false};
+
 //----------------------------------------------------------------------
 template<typename Protocol>
 class RescoreSession
@@ -45,6 +50,16 @@ public:
         socket_.close();
     }
 
+    void terminate_check() {
+        if (message_counter == 0 && termination_scheduled) {
+            // write_msgs are empty, and no new read messages have been added
+            // and SIGTERM had been received in the past, time to go...
+            KALDI_LOG << current_time()
+                      << ": All messages processed. Termination was scheduled. Exiting...";
+            exit(0);
+        }
+    }
+
     void start() {
         boost::asio::async_read(socket_,
                                 boost::asio::buffer(read_msg_.data(),
@@ -63,7 +78,9 @@ public:
         if (!write_in_progress) {
             KALDI_LOG << current_time()
                       << ": will send buffer of size "
-                      << write_msgs_.front()->length();
+                      << write_msgs_.front()->length()
+                      << ". message_counter = "
+                      << message_counter;
             boost::asio::async_write(socket_,
                                      boost::asio::buffer(write_msgs_.front()->data(),
                                                          write_msgs_.front()->length()),
@@ -103,37 +120,59 @@ public:
 
     void handle_read_body(const boost::system::error_code &error) {
         if (!error) {
+            // a new read message has been successfully received and will be processed
+            // and will require a response, increment the counter
+            message_counter += 1;
             KALDI_LOG << current_time()
                       << ": lattice of size "
                       << read_msg_.body_length()
-                      << " received. Rescoring...";
+                      << " received (message_counter = "
+                      << message_counter
+                      << " ). Rescoring...";
             // process read_msg_ and rescore
             dispatcher_->rescore(read_msg_, this->shared_from_this());
             // wait for next header
             start();
+        } else {
+            KALDI_WARN << current_time()
+                       << ": failed to read lattice body from client. Error code: "
+                       << error.message();
         }
     }
 
     void handle_write(const boost::system::error_code &error) {
         // remove message from queue
         write_msgs_.pop_front();
+        message_counter -= 1;
         if (!error) {
             // continue sending
             if (!write_msgs_.empty()) {
                 KALDI_LOG << current_time()
                           << ": will send buffer of size "
-                          << write_msgs_.front()->length();
+                          << write_msgs_.front()->length()
+                          << ". message_counter = "
+                          << message_counter;
                 boost::asio::async_write(socket_,
                                          boost::asio::buffer(write_msgs_.front()->data(),
                                                              write_msgs_.front()->length()),
                                          boost::bind(&RescoreSession::handle_write,
                                                      this->shared_from_this(),
                                                      boost::asio::placeholders::error));
+            } else {
+                KALDI_LOG << current_time()
+                          << ": All scheduled messages have been written. message_counter = "
+                          << message_counter;
+                // no more write messages remaining, a good time to check whether we need to DIE
+                terminate_check();
             }
         } else {
             KALDI_WARN << current_time()
-                       << ": failed to send lattice to client. Error code: "
+                       << ": failed to send lattice to client (message_counter = "
+                       << message_counter
+                       << " ). Error code: "
                        << error.message();
+            // message failed sending, maybe there's no more messages remaining, let's see
+            terminate_check();
         }
     }
 
@@ -179,7 +218,14 @@ public:
         if (!error) {
             // A signal occurred.
             KALDI_LOG << current_time() << ": signal " << signal_number << " received";
-            exit(0);
+            if (message_counter == 0) {
+                exit(0);
+            } else {
+                KALDI_LOG << current_time()
+                          << ": Message counter is not 0 ( = " << message_counter
+                          << "). Scheduling a future termination.";
+                termination_scheduled = true;
+            }
         }
 
         KALDI_WARN << current_time() << " error in signal handler: " << error.message();
