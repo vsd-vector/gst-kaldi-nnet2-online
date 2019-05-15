@@ -102,7 +102,7 @@ namespace kaldi {
             void (*error_log_func)(std::string msg);
             boost::asio::ip::tcp::endpoint endpoint;
             // context is the new name of service
-            boost::shared_ptr<boost::asio::io_context> ctx;
+            boost::shared_ptr<boost::asio::io_service> ctx;
             boost::shared_ptr<boost::asio::ip::tcp::socket> socket;
         };
 

@@ -194,7 +194,7 @@ namespace kaldi {
         this->error_log_func = error_log_func;
 
         // set up socket and associated plumbing
-        ctx = boost::make_shared<boost::asio::io_context>();
+        ctx = boost::make_shared<boost::asio::io_service>();
         socket = boost::make_shared<boost::asio::ip::tcp::socket>(*ctx);
 
         // parse address
