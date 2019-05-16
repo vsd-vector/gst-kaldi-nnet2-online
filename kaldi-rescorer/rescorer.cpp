@@ -51,12 +51,20 @@ public:
     }
 
     void terminate_check() {
-        if (message_counter == 0 && termination_scheduled) {
-            // write_msgs are empty, and no new read messages have been added
-            // and SIGTERM had been received in the past, time to go...
-            KALDI_LOG << current_time()
-                      << ": All messages processed. Termination was scheduled. Exiting...";
-            exit(0);
+        if (termination_scheduled) {
+            if (message_counter == 0) {
+                // write_msgs are empty, and no new read messages have been added
+                // and SIGTERM had been received in the past, time to go...
+                KALDI_LOG << current_time()
+                          << ": All messages processed. Termination was scheduled. Exiting...";
+                exit(0);
+            } else if (message_counter < 0) {
+                KALDI_WARN << current_time()
+                           << ": Message counter < 0: "
+                           << message_counter
+                           << "! This is an error. Terminating...";
+                exit(1);
+            }
         }
     }
 
@@ -101,6 +109,10 @@ public:
                 out->body()[1] = 'E';
                 out->body()[2] = 'R';
                 out->encode_header();
+                // sending an error message decrements counter, so we have to increment it
+                // here as if having received a valid lattice. otherwise, message counter goes
+                // beneath 0, and things are not great.
+                message_counter += 1;
                 deliver(out);
                 // disconnect
                 close();
@@ -220,6 +232,12 @@ public:
             KALDI_LOG << current_time() << ": signal " << signal_number << " received";
             if (message_counter == 0) {
                 exit(0);
+            } else if (message_counter < 0) {
+                KALDI_WARN << current_time()
+                           << ": Message counter < 0: "
+                           << message_counter
+                           << "! This is an error. Terminating...";
+                exit(1);
             } else {
                 KALDI_LOG << current_time()
                           << ": Message counter is not 0 ( = " << message_counter
