@@ -237,7 +237,11 @@ namespace kaldi {
 
     bool RemoteRescore::TcpSocket::send_bytes(const char *buffer, ssize_t bytes) {
         try {
-            return socket->write_some(boost::asio::buffer(buffer, bytes)) == bytes;
+            std::size_t written = boost::asio::write(*socket, boost::asio::buffer(buffer, bytes));
+//            std::stringstream ss;
+//            ss << "Written " << written << " bytes. Expected to write " << bytes << " bytes.";
+//            this->error_log_func(ss.str());
+            return written == bytes;
         } catch (boost::system::system_error &e) {
             std::stringstream ss;
             ss << "Error sending bytes: " << e.what();
@@ -248,7 +252,11 @@ namespace kaldi {
 
     bool RemoteRescore::TcpSocket::receive_bytes(char *buffer, ssize_t bytes) {
         try {
-            return socket->read_some(boost::asio::buffer(buffer, bytes)) != -1;
+            std::size_t read = boost::asio::read(*socket, boost::asio::buffer(buffer, bytes));
+//            std::stringstream ss;
+//            ss << "Read " << read << " bytes. Expected " << bytes << " bytes.";
+//            this->error_log_func(ss.str());
+            return read != -1;
         } catch (boost::system::system_error &e) {
             std::stringstream ss;
             ss << "Error receiving bytes: " << e.what();
