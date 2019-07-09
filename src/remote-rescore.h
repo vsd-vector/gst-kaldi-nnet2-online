@@ -46,6 +46,8 @@ namespace kaldi {
 
         bool rescore(CompactLattice &lat, CompactLattice &rescored_lat);
 
+        void wait_for_rescorer();
+
         ~RemoteRescore();
 
     private:

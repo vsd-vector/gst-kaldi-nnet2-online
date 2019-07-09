@@ -23,6 +23,7 @@
 #include <istream>
 #include <sys/socket.h>
 #include <boost/make_shared.hpp>
+#include <unistd.h>
 
 namespace kaldi {
 
@@ -128,6 +129,16 @@ namespace kaldi {
         rescore_socket->close_socket();
 
         return true;
+    }
+
+    void RemoteRescore::wait_for_rescorer() {
+        while (true) {
+            if (rescore_socket->connect_socket()) {
+                rescore_socket->close_socket();
+                return;
+            }
+	    usleep(15*1000*1000);
+	}
     }
 
     RemoteRescore::~RemoteRescore() {
