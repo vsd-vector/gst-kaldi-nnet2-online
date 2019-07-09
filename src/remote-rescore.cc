@@ -137,8 +137,8 @@ namespace kaldi {
                 rescore_socket->close_socket();
                 return;
             }
-	    usleep(15*1000*1000);
-	}
+        usleep(15*1000*1000);
+        }
     }
 
     RemoteRescore::~RemoteRescore() {
