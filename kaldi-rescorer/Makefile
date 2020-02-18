@@ -27,7 +27,7 @@ EXTRA_LDLIBS += -lboost_system -lboost_date_time
 
 # MKL libs required when linked via shared library
 ifdef MKLROOT
-EXTRA_LDLIBS+=-lmkl_p4n -lmkl_def
+EXTRA_LDLIBS+=-lmkl_def
 endif
 
 # g++ linker
