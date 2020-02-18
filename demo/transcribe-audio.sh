@@ -2,13 +2,13 @@
 
 if [ $# != 1 ]; then
     echo "Usage: transcribe-audio.sh <audio>"
-    echo "e.g.: transcribe-audio.sh dr_strangelove.mp3" 
+    echo "e.g.: transcribe-audio.sh dr_strangelove.mp3"
     exit 1;
 fi
 
 ! GST_PLUGIN_PATH=../src gst-inspect-1.0 kaldinnet2onlinedecoder > /dev/null 2>&1 && echo "Compile the plugin in ../src first" && exit 1;
 
-if [ ! -f HCLG.fst ]; then
+if [ ! -f models/HCLG.fst ]; then
     echo "Run ./prepare-models.sh first to download models"
     exit 1;
 fi
@@ -18,11 +18,11 @@ audio=$1
 GST_PLUGIN_PATH=../src gst-launch-1.0 --gst-debug="" -q filesrc location=$audio ! decodebin ! audioconvert ! audioresample ! \
 kaldinnet2onlinedecoder \
   use-threaded-decoder=true \
-  model=final.mdl \
-  fst=HCLG.fst \
-  word-syms=words.txt \
-  phone-syms=phones.txt \
-  word-boundary-file=word_boundary.int \
+  model=models/final.mdl \
+  fst=models/HCLG.fst \
+  word-syms=models/words.txt \
+  phone-syms=models/phones.txt \
+  word-boundary-file=models/word_boundary.int \
   num-nbest=3 \
   num-phone-alignment=3 \
   do-phone-alignment=true \
