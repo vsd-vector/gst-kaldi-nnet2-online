@@ -55,7 +55,6 @@
 #include "lat/confidence.h"
 #include "hmm/hmm-utils.h"
 #include "nnet3/nnet-utils.h"
-#include "lat/sausages.h"
 
 #include <fst/script/project.h>
 
@@ -106,6 +105,7 @@ enum {
   PROP_NUM_NBEST,
   PROP_NUM_PHONE_ALIGNMENT,
   PROP_WORD_BOUNDARY_FILE,
+  PROP_ALIGN_LEXICON_FILE,
   PROP_MIN_WORDS_FOR_IVECTOR,
   PROP_RESCORE_SOCKET,
   PROP_LAST
@@ -117,6 +117,7 @@ enum {
 #define DEFAULT_WORD_SYMS       ""
 #define DEFAULT_PHONE_SYMS      ""
 #define DEFAULT_WORD_BOUNDARY_FILE ""
+#define DEFAULT_ALIGN_LEXICON_FILE ""
 #define DEFAULT_LMWT_SCALE	1.0
 #define DEFAULT_CHUNK_LENGTH_IN_SECS  0.05
 #define DEFAULT_USE_THREADED_DECODER false
@@ -211,6 +212,9 @@ static void gst_kaldinnet2onlinedecoder_load_big_lm(Gstkaldinnet2onlinedecoder *
                                                     const GValue * value);
 
 static void gst_kaldinnet2onlinedecoder_load_word_boundary_info(Gstkaldinnet2onlinedecoder * filter,
+                                                                const GValue * value);
+
+static void gst_kaldinnet2onlinedecoder_load_align_lexicon_info(Gstkaldinnet2onlinedecoder * filter,
                                                                 const GValue * value);
 
 static void gst_kaldinnet2onlinedecoder_reset_cmvn_state(Gstkaldinnet2onlinedecoder * filter);
@@ -403,6 +407,15 @@ static void gst_kaldinnet2onlinedecoder_class_init(
 
   g_object_class_install_property(
       gobject_class,
+      PROP_ALIGN_LEXICON_FILE,
+      g_param_spec_string(
+          "align-lexicon-file",
+          "Align-lexicon file. Setting this property triggers generating word alignments in full results",
+          "Align-lexicon file. Setting this property triggers generating word alignments in full results",
+          DEFAULT_ALIGN_LEXICON_FILE, (GParamFlags) G_PARAM_READWRITE));
+
+  g_object_class_install_property(
+      gobject_class,
       PROP_USE_THREADED_DECODER,
       g_param_spec_boolean(
           "use-threaded-decoder",
@@ -529,6 +542,7 @@ static void gst_kaldinnet2onlinedecoder_init(
   filter->word_syms_filename = g_strdup(DEFAULT_WORD_SYMS);
   filter->phone_syms_filename = g_strdup(DEFAULT_PHONE_SYMS);
   filter->word_boundary_info_filename = g_strdup(DEFAULT_WORD_BOUNDARY_FILE);
+  filter->align_lexicon_info_filename = g_strdup(DEFAULT_ALIGN_LEXICON_FILE);
 
   filter->do_phone_alignment = false;
   filter->num_phone_alignment = 1;
@@ -750,6 +764,9 @@ static void gst_kaldinnet2onlinedecoder_set_property(GObject * object,
     case PROP_WORD_BOUNDARY_FILE:
       gst_kaldinnet2onlinedecoder_load_word_boundary_info(filter, value);
       break;
+    case PROP_ALIGN_LEXICON_FILE:
+      gst_kaldinnet2onlinedecoder_load_align_lexicon_info(filter, value);
+      break;
     case PROP_USE_THREADED_DECODER:
       filter->use_threaded_decoder = g_value_get_boolean(value);
       register_decoding_config(filter);
@@ -902,6 +919,9 @@ static void gst_kaldinnet2onlinedecoder_get_property(GObject * object,
       break;
     case PROP_WORD_BOUNDARY_FILE:
       g_value_set_string(value, filter->word_boundary_info_filename);
+      break;
+    case PROP_ALIGN_LEXICON_FILE:
+      g_value_set_string(value, filter->align_lexicon_info_filename);
       break;
     case PROP_DO_PHONE_ALIGNMENT:
       g_value_set_boolean(value, filter->do_phone_alignment);
@@ -1168,6 +1188,14 @@ static std::vector<NBestResult> gst_kaldinnet2onlinedecoder_nbest_results(
       clat = aligned_clat;
     }
   }
+
+  if (filter->align_lexicon_info) {
+    CompactLattice aligned_clat;
+    WordAlignLatticeLexiconOpts opts;
+    if (WordAlignLatticeLexicon(clat, *(filter->trans_model), *(filter->align_lexicon_info), opts, &aligned_clat)) {
+      clat = aligned_clat;
+    }
+  }
   
   Lattice lat;
   ConvertLattice(clat, &lat);
@@ -1200,6 +1228,9 @@ static std::vector<NBestResult> gst_kaldinnet2onlinedecoder_nbest_results(
       }
     }
     if (filter->word_boundary_info) {
+      nbest_result.word_alignment = gst_kaldinnet2onlinedecoder_word_alignment(filter, nbest_lats[i], words, clat);
+    }
+    if (filter->align_lexicon_info) {
       nbest_result.word_alignment = gst_kaldinnet2onlinedecoder_word_alignment(filter, nbest_lats[i], words, clat);
     }
     nbest_results.push_back(nbest_result);
@@ -2015,6 +2046,50 @@ gst_kaldinnet2onlinedecoder_load_word_boundary_info(Gstkaldinnet2onlinedecoder *
     g_free(str);
   } else {
     GST_WARNING_OBJECT(filter, "Word boundary filename must be a string. Ignoring it.");
+  }
+}
+
+static void
+gst_kaldinnet2onlinedecoder_load_align_lexicon_info(Gstkaldinnet2onlinedecoder * filter,
+                                                    const GValue * value) {
+  if (G_VALUE_HOLDS_STRING(value)) {
+    gchar* str = g_value_dup_string(value);
+
+    // Check if the model filename is not empty
+    if (strcmp(str, "") != 0) {
+      try {
+        GST_DEBUG_OBJECT(filter, "Loading align lexicon file: %s", str);
+        std::vector<std::vector<int32> > lexicon;
+        bool binary_in;
+        Input ki(str, &binary_in);
+        KALDI_ASSERT(!binary_in && "Not expecting binary file for lexicon");
+        if (!ReadLexiconForWordAlign(ki.Stream(), &lexicon)) {
+          KALDI_ERR << "Error reading alignment lexicon from "
+                    << str;
+        }
+
+        WordAlignLatticeLexiconInfo* lexicon_info = new WordAlignLatticeLexiconInfo(lexicon);
+
+        // Delete old objects if needed
+        if (filter->align_lexicon_info) {
+          delete filter->align_lexicon_info;
+        }
+
+        // Replace the align lexicon info
+        filter->align_lexicon_info = lexicon_info;
+
+        // Only change the parameter if it has worked correctly
+        g_free(filter->align_lexicon_info_filename);
+        filter->align_lexicon_info_filename = g_strdup(str);
+
+      } catch (std::runtime_error& e) {
+        GST_WARNING_OBJECT(filter, "Error loading the align lexicon info: %s", str);
+      }
+    }
+
+    g_free(str);
+  } else {
+    GST_WARNING_OBJECT(filter, "Align lexicon filename must be a string. Ignoring it.");
   }
 }
 

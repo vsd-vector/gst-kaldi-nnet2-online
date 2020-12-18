@@ -41,6 +41,7 @@
 #include "lat/lattice-functions.h"
 #include "lm/const-arpa-lm.h"
 #include "lat/word-align-lattice.h"
+#include "lat/word-align-lattice-lexicon.h"
 #include "lat/determinize-lattice-pruned.h"
 
 namespace kaldi {
@@ -86,6 +87,7 @@ struct _Gstkaldinnet2onlinedecoder {
   gchar* word_syms_filename;
   gchar* phone_syms_filename;
   gchar* word_boundary_info_filename;
+  gchar* align_lexicon_info_filename;
 
   SimpleOptionsGst *simple_options;
   OnlineEndpointConfig *endpoint_config;
@@ -108,6 +110,7 @@ struct _Gstkaldinnet2onlinedecoder {
   fst::SymbolTable *word_syms;
   fst::SymbolTable *phone_syms;
   WordBoundaryInfo *word_boundary_info;
+  WordAlignLatticeLexiconInfo *align_lexicon_info;
   int sample_rate;
   int nbest;
   gboolean decoding;
